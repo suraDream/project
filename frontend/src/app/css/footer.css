@@ -1,0 +1,23 @@
+:root {
+  --text-color: #03045e;
+}
+
+footer {
+  background-color: #edefef;
+  width: 100%;
+  height: 70px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: var(--text-color);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+
+.p {
+  margin: 10px auto;
+  font-weight: 300;
+}
