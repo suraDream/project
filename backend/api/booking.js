@@ -1,3 +1,5 @@
+const { notify } = require("./register");
+
 module.exports = function (io) {
   const express = require("express");
   const pool = require("../db");
@@ -385,17 +387,17 @@ module.exports = function (io) {
             .json({ success: false, message: "Invalid startDate or endDate" });
         }
 
-        const overlapResult = await client.query(
-        `SELECT * FROM bookings
-          WHERE sub_field_id = $1
-            AND status NOT IN ('rejected')
-            AND (
-              (start_date || ' ' || start_time)::timestamp < $3::timestamp
-              AND (end_date || ' ' || end_time)::timestamp > $2::timestamp
-            )
-          FOR UPDATE`,
-        [subFieldId, `${startDate} ${startTime}`, `${endDate} ${endTime}`]
-      );
+const overlapResult = await client.query(
+  `SELECT * FROM bookings
+    WHERE sub_field_id = $1
+      AND status NOT IN ('rejected')
+      AND (
+        (start_date || ' ' || start_time)::timestamp < $3::timestamp
+        AND (end_date || ' ' || end_time)::timestamp > $2::timestamp
+      )
+    FOR UPDATE`,
+  [subFieldId, `${startDate} ${startTime}`, `${endDate} ${endTime}`]
+);
 
       const timeNow = DateTime.now().setZone("Asia/Bangkok");
       const timSubmit = `${startDate}T${startTime}`;
@@ -498,6 +500,10 @@ module.exports = function (io) {
         );
 
         const bookingId = bookingResult.rows[0].booking_id;
+        const ownerId = await client.query(
+          `SELECT user_id FROM field WHERE field_id = $1`,
+          [fieldId]
+        );
 
           for (const facility of selectedFacilities) {
           await client.query(
@@ -576,13 +582,27 @@ module.exports = function (io) {
           }
         }
 
+     const notifyData = await client.query(
+  `INSERT INTO notifications (sender_id, recive_id, topic, messages, key_id, status)
+   VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+  [userId, ownerId.rows[0].user_id, "new_booking", "มีการจองใหม่", bookingId, "unread"]
+);
+
         await client.query("COMMIT");
-        console.log(" emitting slot_booked", bookingId);
-        if (req.io) {
-          req.io.emit("slot_booked", {
-            bookingId,
-          });
-        }
+      
+     if (req.io) {
+  req.io.emit("slot_booked", {
+    subFieldId: subFieldId,
+    bookingDate: bookingDate,
+  });
+
+  req.io.emit("new_notification", {
+    notifyId: notifyData.rows[0].notify_id,
+    topic: "new_booking",
+    reciveId: ownerId.rows[0].user_id,
+    keyId: bookingId,
+  });
+}
 
         console.log("Booking saved successfully");
         res.status(200).json({ message: "Booking saved successfully" });

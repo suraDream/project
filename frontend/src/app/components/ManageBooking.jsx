@@ -32,45 +32,52 @@ export default function Mybooking() {
     }
   }, [user, isLoading, router]);
 
-  const fetchData = useCallback(async () => {
+  // ✅ แก้ fetchData function - ลบ async ออก
+  const fetchData = useCallback(() => {
     if (!user?.user_id) return;
 
-    try {
-      const queryParams = new URLSearchParams();
-      if (filters.date) queryParams.append("date", filters.date);
-      if (filters.status) queryParams.append("status", filters.status);
+    // ✅ สร้าง async function ข้างใน
+    const loadData = async () => {
+      try {
+        const queryParams = new URLSearchParams();
+        if (filters.date) queryParams.append("date", filters.date);
+        if (filters.status) queryParams.append("status", filters.status);
 
-      const res = await fetch(
-        `${API_URL}/booking/my-bookings/${
-          user.user_id
-        }?${queryParams.toString()}`,
-        {
-          credentials: "include",
-        }
-      );
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setMybooking(data.data);
-        setUserFirstUserName(data.user?.first_name || "");
-        setUserLastUserName(data.user?.last_name || "");
-        setUserInfo(
-          `${data.user?.first_name || ""} ${data.user?.last_name || ""}`
+        const res = await fetch(
+          `${API_URL}/booking/my-bookings/${
+            user.user_id
+          }?${queryParams.toString()}`,
+          {
+            credentials: "include",
+          }
         );
-        console.log("Booking Data:", data.data);
-      } else {
-        console.log("Booking fetch error:", data.error);
-        setMessage(data.error);
+
+        const data = await res.json();
+
+        if (res.ok) {
+          setMybooking(data.data);
+          setUserFirstUserName(data.user?.first_name || "");
+          setUserLastUserName(data.user?.last_name || "");
+          setUserInfo(
+            `${data.user?.first_name || ""} ${data.user?.last_name || ""}`
+          );
+          console.log("Booking Data:", data.data);
+        } else {
+          console.log("Booking fetch error:", data.error);
+          setMessage(data.error);
+          setMessageType("error");
+        }
+      } catch (error) {
+        console.error("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้", error);
+        setMessage("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
         setMessageType("error");
+      } finally {
+        setDataLoading(false);
       }
-    } catch (error) {
-      console.error("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้", error);
-      setMessage("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
-      setMessageType("error");
-    } finally {
-      setDataLoading(false);
-    }
+    };
+
+    // ✅ เรียก async function
+    loadData();
   }, [user?.user_id, filters, API_URL]);
 
   useEffect(() => {

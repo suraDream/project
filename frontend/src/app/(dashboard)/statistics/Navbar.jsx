@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/app/contexts/AuthContext";
@@ -24,136 +24,130 @@ export default function Navbar() {
   const authDropdownRef = useRef(null);
   const authButtonRef = useRef(null);
   const socketRef = useRef(null);
-
-  //  const [bookingId, setBookingId] = useState(null);
-  const [notifications, setNotifications] = useState([]); 
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [keyId, setKeyId] = useState(null);
-  const [topic, setTopic] = useState('');
-  const [notifyId, setNotifyId] = useState(null);
+  const [bookingId, setBookingId] = useState(null);
+    const [notifications, setNotifications] = useState([]); 
+  const [unreadCount, setUnreadCount] = useState(0); // 
   const router = useRouter();
   const pathname = usePathname();
   const { user, isLoading } = useAuth();
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
-
-
-  useEffect(() => {
-    if (!user?.user_id || !API_URL) return;
-    loadExistingNotifications();
-  }, [user?.user_id, API_URL,keyId]);
   
 
 
-const loadExistingNotifications = async () => {
-      try {
-        console.log("Loading existing notifications for user:", user.user_id);
-        const res = await fetch(`${API_URL}/notification/all/${user.user_id}`);
-        
-        if (res.ok) {
-          const data = await res.json();
-          console.log("Loaded existing notifications:", data);
-          
-          if (Array.isArray(data) && data.length > 0) {
-                const formattedNotifications = data.map(notification => ({
-              notifyId: notification.notify_id,
-              keyId: notification.key_id,
-              topic: notification.topic,
-              message: `การจองจาก ${notification.first_name} ${notification.last_name}`,
-              customerName: `${notification.recive_first_name} ${notification.recive_last_name}`,
-              fieldName: notification.field_name,
-              subFieldName: notification.sub_field_name,
-              bookingDate: notification.booking_date,
-              startTime: notification.start_time,
-              endTime: notification.end_time,
-              created_at: notification.created_at,
-              status : notification.status,
-            }));
+  // ✅ แก้ Notification ให้เป็น useCallback
+  const Notification = useCallback((bookingId) => {
+    console.log("🔔 Notification function called with bookingId:", bookingId);
 
-            // นับจากทั้งชุดข้อมูล (recommended: นับจาก DB result)
-            const totalUnread = formattedNotifications.filter(n => String(n.status).toLowerCase() === "unread").length;
-            setUnreadCount(totalUnread);
-
-            // แสดงแค่ 5 รายการ
-            setNotifications(formattedNotifications.slice(0, 5));
-
-            
-            
-          }
-        }
-      } catch (error) {
-        console.error("Error loading existing notifications:", error);
-      }
-    };
-
-
-
-  useEffect(() => {
-    if (!API_URL || !user?.user_id) {
-      console.log("Skip socket init - Missing API_URL or user_id");
+    if (!bookingId) {
+      console.error("❌ Missing bookingId parameter");
       return;
     }
 
-    console.log("Initializing socket with API_URL:", API_URL);
-    const socket = io(API_URL, {
-      transports: ["websocket"],
-      withCredentials: true,
-    });
-
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      console.log("Socket connected:", socket.id);
-    });
-
-      socket.on("new_notification", (data) => {
-      console.log("new_notification event received:", data);
-      console.log("Current user ID:", user?.user_id, " | Notification user ID:", data?.reciveId);
-
-      if (parseInt(user?.user_id) === parseInt(data?.reciveId)) {
-        console.log("User matched! Processing notification for keyId:", data.keyId);
-        setKeyId(data.keyId);
-        setTopic(data.topic);
-        setNotifyId(data.notifyId);
-
-        loadExistingNotifications();
-        
-
-      } else {
-        console.log("Skipping notification (user not matched)");
-      }
-    });
-
-    socket.on("connect_error", (err) => {
-      console.error("Socket error:", err.message);
-    });
-
-    return () => {
-      console.log("Disconnecting socket");
-      socket.disconnect();
-    };
-  }, [API_URL, user?.user_id,]);
-
-  // แก้ handleBellClick เพื่อ mark as read
-  const handleBellClick = () => {
-    setIsNotifyOpen((prev) => !prev);
-    
-    // Mark notifications as read
-    if (!isNotifyOpen) {
-      setNotifications(prev => 
-        prev.map(notification => ({ ...notification, setNo: true }))
-      );
-      
-      
-      
-      // อัปเดตสถานะ read ในฐานข้อมูล (ถ้ามี API)
-      if (user?.user_id) {
-        fetch(`${API_URL}/notification/mark-read/${user.user_id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        }).catch(err => console.log("Mark as read error:", err));
-      }
+    if (!user?.token) {
+      console.error("❌ Missing user token");
+      return;
     }
+
+    (async () => {
+      try {
+        console.log("📡 Fetching notification for bookingId:", bookingId);
+        const res = await fetch(`${API_URL}/notification/owner/${bookingId}`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${user.token}`,
+          },
+        });
+
+        console.log("📡 API Response status:", res.status);
+        const text = await res.text();
+        console.log("📡 API raw response text:", text);
+
+        try {
+          const data = JSON.parse(text);
+          console.log("✅ Parsed Notification data:", data);
+
+          setNotifications((prev) => {
+            if (data.length > 0) {
+              const apiNotification = {
+                bookingId: data[0].bookingId || bookingId,
+                message: `การจองจาก ${data[0].first_name} ${data[0].last_name}`,
+                customerName: `${data[0].first_name} ${data[0].last_name}`,
+                fieldName: data[0].field_name,
+                subFieldName: data[0].sub_field_name,
+                bookingDate: data[0].booking_date,
+                startTime: data[0].start_time,
+                endTime: data[0].end_time,
+                timestamp: new Date().toISOString()
+              };
+              const updatedNotifications = [
+                apiNotification,
+                ...prev.filter(n => n.bookingId !== bookingId)
+              ].slice(0, 5);
+              return updatedNotifications;
+            }
+            return prev;
+          });
+        } catch (e) {
+          console.error("❌ Failed to parse JSON:", text, e);
+        }
+      } catch (error) {
+        console.error("❌ Fetch error:", error);
+      }
+    })();
+  }, [user?.token, API_URL]);
+
+useEffect(() => {
+  if (!user?.id) {
+    console.log("⚠️ User is not logged in yet, skip socket init");
+    return;
+  }
+
+  console.log("🚀 Initializing socket with API_URL:", API_URL, "for user:", user?.id);
+  const socket = io(API_URL, {
+    transports: ["websocket"],
+    withCredentials: true,
+  });
+
+  socketRef.current = socket;
+
+  socket.on("connect", () => {
+    console.log("✅ Socket connected:", socket.id);
+  });
+
+  socket.on("new_notification", (data) => {
+    console.log("📩 new_notification event received:", data);
+    console.log("👤 Current user ID:", user?.id, " | Notification user ID:", data?.userId);
+
+    if (data.userId === user?.id) {
+      console.log("🎯 User matched, calling Notification() with bookingId:", data.bookingId);
+      setBookingId(data.bookingId);
+      Notification(data.bookingId);
+    } else {
+      console.log("⏭️ Skipping notification (user not matched)");
+    }
+  });
+
+  socket.on("connect_error", (err) => {
+    console.error("❌ Socket error:", err.message);
+  });
+
+  return () => socket.disconnect();
+}, [API_URL, user?.id, Notification]);
+
+  // ✅ เมื่อ bookingId เปลี่ยน
+  useEffect(() => {
+    if (bookingId && user?.token) {
+      console.log("🔄 bookingId effect triggered:", bookingId);
+      Notification(bookingId);
+    }
+  }, [bookingId, user?.token, Notification]);
+
+  const handleBellClick = () => {
+    console.log("Notification bell clicked",notifications);
+    setIsNotifyOpen((prev) => !prev);
+    setUnreadCount(0); 
   };
 
   useEffect(() => {
@@ -221,6 +215,7 @@ const loadExistingNotifications = async () => {
           <span className="bar" />
           <span className="bar" />
         </button>
+     
       </div>
       <div className="mid-logo">
         <Link href="/" className="logo">
@@ -260,6 +255,7 @@ const loadExistingNotifications = async () => {
               }
             }}
           />
+             
         </div>
 
         {isLoading ? (
@@ -444,9 +440,13 @@ const loadExistingNotifications = async () => {
           <div className="notify">
             <button
               className="icon-btn notify-btn"
-              onClick={handleBellClick}
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log("Bell click (before handler) - stopping propagation");
+                handleBellClick();
+              }}
               aria-label="แจ้งเตือน"
-              ref={notifyBtnRef}
+              ref={notifyBtnRef} // เพิ่ม ref
             >
               <img
                 src="https://res.cloudinary.com/dlwfuul9o/image/upload/v1755157482/mdi-light--bell_wt2uc1.png"
@@ -458,41 +458,14 @@ const loadExistingNotifications = async () => {
             </button>
 
             {isNotifyOpen && (
-              <div className="notify-dropdown" ref={notifyRef} >
+              <div className="notify-dropdown">
                 <ul>
                   {notifications.length > 0 ? (
                     notifications.map((notification, index) => (
-                      <li
-                        key={`${notification.notifyId}-${index}`}
-                        className={!notification.isRead ? 'unread' : ''}
-                        onClick={() => {
-                          if (notification.topic === "new_booking") {
-                            if (notification.keyId) {
-                              router.push(`/booking-detail/${notification.keyId}`);
-                            } else {
-                              alert("ไม่พบข้อมูลการจองนี้");
-                            }
-                          } else if (notification.topic === "new_post") {
-                            if (notification.keyId) {
-                              // router.push(`/post-detail/${notification.keyId}`);
-                            } else {
-                              alert("ไม่พบข้อมูลโพสต์นี้");
-                            }
-                          } else {
-                            router.push(`/notifications/${user?.user_id}`);
-                          }
-                        }}
-                        style={{
-                          cursor: 'pointer',
-                          backgroundColor: !notification.isRead ? '#f0f8ff' : 'transparent',
-                          borderLeft: !notification.isRead ? '3px solid #007bff' : 'none',
-                          padding: '8px 12px',
-                          borderBottom: '1px solid #eee'
-                        }}
-                      >
+                      <li key={index}>
                         {notification.customerName ? (
                           <>
-                            <strong>การจองจาก {notification.customerName}</strong>
+                            การจองจาก {notification.customerName}
                             <br />
                             <small>{notification.fieldName} - {notification.subFieldName}</small>
                             <br />
@@ -501,36 +474,13 @@ const loadExistingNotifications = async () => {
                         ) : (
                           `การจอง #${notification.bookingId} ใหม่`
                         )}
-                        <span className="time" style={{ display: 'block', fontSize: '0.8em', color: '#666', marginTop: '4px' }}>
-                          {notification.created_at 
-                            ? new Date(notification.created_at).toLocaleString('th-TH')
-                            : 'เมื่อสักครู่'
-                          }
-                        </span>
+                        <span className="time">เมื่อสักครู่</span>
                       </li>
                     ))
                   ) : (
                     <li>ไม่มีการแจ้งเตือน</li>
                   )}
                 </ul>
-                <button 
-                  onClick={() => {
-                    setIsNotifyOpen(false);
-                    router.push(`/notifications/${user?.user_id}`);
-                  }}
-                  style={{
-                    width: '100%',
-                    padding: '8px',
-                    background: '#f8f9fa',
-                    border: 'none',
-                    borderTop: '1px solid #dee2e6',
-                    cursor: 'pointer',
-                    color: '#007bff',
-                    fontWeight: '500'
-                  }}
-                >
-                  ดูทั้งหมด
-                </button>
               </div>
             )}
           </div>

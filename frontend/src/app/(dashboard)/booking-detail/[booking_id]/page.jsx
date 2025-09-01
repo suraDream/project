@@ -151,6 +151,32 @@ export default function BookingDetail() {
     }
   }, [booking_id, API_URL]);
 
+ useEffect(() => {
+    const readNotifications = async () => {
+      if (!API_URL || !booking_id) return;
+      try {
+        const res = await fetch(`${API_URL}/notification/read-notification`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key_id: Number(booking_id) }),
+        });
+
+        if (res.ok) {
+          console.log("Notifications marked as read for booking:", booking_id);
+          // แจ้ง Navbar ให้รีโหลด (optional)
+          window.dispatchEvent(new CustomEvent("notifications-marked-read", { detail: { key_id: Number(booking_id) } }));
+        } else {
+          console.warn("Mark read failed:", await res.text());
+        }
+      } catch (error) {
+        console.error("Error marking notifications as read:", error);
+      }
+    };
+
+    readNotifications();
+  }, [API_URL, booking_id]);
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);

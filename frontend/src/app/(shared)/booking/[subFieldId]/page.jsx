@@ -149,7 +149,11 @@ export default function Booking() {
     socket.on("slot_booked", (data) => {
       console.log("slot_booked:", data);
       if (subFieldId && bookingDate) {
+        console.log("slot_booked: subFieldId:", subFieldId);
+        console.log("slot_booked: bookingDate:", bookingDate);
         fetchBookedSlots();
+        fetchFacilityAvailability();
+
       }
     });
 
@@ -158,7 +162,7 @@ export default function Booking() {
     });
 
     return () => socket.disconnect();
-  }, [API_URL, subFieldId, bookingDate]);
+  }, [API_URL, subFieldId, bookingDate,facilityAvailability]);
 
   useEffect(() => {
     if (isBooked) {
