@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/app/contexts/AuthContext";
 import LogoutButton from "@/app/components/Logout";
 import "@/app/css/navbar.css";
-import { io } from "socket.io-client";  
+import { io } from "socket.io-client";
 
 export default function Navbar() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -24,69 +24,94 @@ export default function Navbar() {
   const authDropdownRef = useRef(null);
   const authButtonRef = useRef(null);
   const socketRef = useRef(null);
+  const loadedInitialRef = useRef(false); // ป้องกันการโหลดซ้ำ
+  const loadingRef = useRef(false); // ป้องกัน concurrent loading
+  const lastLoadTime = useRef(0); // ป้องกัน rapid calls
 
   //  const [bookingId, setBookingId] = useState(null);
-  const [notifications, setNotifications] = useState([]); 
+  const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [keyId, setKeyId] = useState(null);
-  const [topic, setTopic] = useState('');
+  const [topic, setTopic] = useState("");
   const [notifyId, setNotifyId] = useState(null);
   const router = useRouter();
   const pathname = usePathname();
   const { user, isLoading } = useAuth();
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
+  const loadExistingNotifications = useCallback(async () => {
+    if (!user?.user_id || !API_URL || loadingRef.current) return;
 
+    loadingRef.current = true;
+    try {
+      console.log("Loading existing notifications for user:", user.user_id);
+      const res = await fetch(`${API_URL}/notification/all/${user.user_id}`);
 
-  useEffect(() => {
-    if (!user?.user_id || !API_URL) return;
-    loadExistingNotifications();
-  }, [user?.user_id, API_URL,keyId]);
-  
+      if (res.ok) {
+        const data = await res.json();
+        console.log("Loaded existing notifications:", data);
 
+        if (Array.isArray(data)) {
+          const formattedNotifications = data.map((notification) => ({
+            notifyId: notification.notify_id,
+            keyId: notification.key_id,
+            topic: notification.topic,
+            message: ` ${notification.sender_first_name} ${notification.sender_last_name}`,
+            customerName: `${notification.recive_first_name} ${notification.recive_last_name}`,
+            fieldName: ` ${notification.field_name}`,
+            subFieldName: ` ${notification.sub_field_name}`,
+            bookingDate: notification.booking_date,
+            startTime: notification.start_time,
+            endTime: notification.end_time,
+            created_at: notification.created_at,
+            status: notification.status,
+            isRead: String(notification.status).toLowerCase() !== "unread",
+          }));
+          console.log("Formatted notifications:", formattedNotifications);
+          const totalUnread = formattedNotifications.filter(
+            (n) => !n.isRead
+          ).length;
+          setUnreadCount(totalUnread);
+          setNotifications(formattedNotifications.slice(0, 5));
 
-const loadExistingNotifications = async () => {
-      try {
-        console.log("Loading existing notifications for user:", user.user_id);
-        const res = await fetch(`${API_URL}/notification/all/${user.user_id}`);
-        
-        if (res.ok) {
-          const data = await res.json();
-          console.log("Loaded existing notifications:", data);
-          
-          if (Array.isArray(data) && data.length > 0) {
-                const formattedNotifications = data.map(notification => ({
-              notifyId: notification.notify_id,
-              keyId: notification.key_id,
-              topic: notification.topic,
-              message: `การจองจาก ${notification.first_name} ${notification.last_name}`,
-              customerName: `${notification.recive_first_name} ${notification.recive_last_name}`,
-              fieldName: notification.field_name,
-              subFieldName: notification.sub_field_name,
-              bookingDate: notification.booking_date,
-              startTime: notification.start_time,
-              endTime: notification.end_time,
-              created_at: notification.created_at,
-              status : notification.status,
-            }));
-
-            // นับจากทั้งชุดข้อมูล (recommended: นับจาก DB result)
-            const totalUnread = formattedNotifications.filter(n => String(n.status).toLowerCase() === "unread").length;
-            setUnreadCount(totalUnread);
-
-            // แสดงแค่ 5 รายการ
-            setNotifications(formattedNotifications.slice(0, 5));
-
-            
-            
-          }
+          // เก็บใน localStorage เพื่อไม่ให้หายเมื่อรีเฟรช
+          localStorage.setItem("unreadCount", totalUnread.toString());
         }
-      } catch (error) {
-        console.error("Error loading existing notifications:", error);
       }
-    };
+    } catch (error) {
+      console.error("Error loading existing notifications:", error);
+    } finally {
+      loadingRef.current = false;
+    }
+  }, [API_URL, user?.user_id]);
 
+  // โหลดครั้งเดียวตอนเริ่มต้น - ไม่มี keyId ใน dependency
+  useEffect(() => {
+    if (!user?.user_id) {
+      // ไม่มี user → clear state และ localStorage
+      setNotifications([]);
+      setUnreadCount(0);
+      localStorage.removeItem("unreadCount");
+      return;
+    }
 
+    if (!API_URL || loadedInitialRef.current) return;
+
+    // โหลด unread count จาก localStorage ก่อน
+    const savedCount = localStorage.getItem("unreadCount");
+    if (savedCount) {
+      setUnreadCount(parseInt(savedCount));
+    }
+
+    loadedInitialRef.current = true;
+    loadExistingNotifications();
+  }, [user?.user_id, API_URL, loadExistingNotifications]);
+
+  // Reset การ load เมื่อเปลี่ยน user
+  useEffect(() => {
+    loadedInitialRef.current = false;
+    loadingRef.current = false;
+  }, [user?.user_id]);
 
   useEffect(() => {
     if (!API_URL || !user?.user_id) {
@@ -106,19 +131,45 @@ const loadExistingNotifications = async () => {
       console.log("Socket connected:", socket.id);
     });
 
-      socket.on("new_notification", (data) => {
+    socket.on("new_notification", (data) => {
       console.log("new_notification event received:", data);
-      console.log("Current user ID:", user?.user_id, " | Notification user ID:", data?.reciveId);
+      console.log(
+        "Current user ID:",
+        user?.user_id,
+        " | Notification user ID:",
+        data?.reciveId
+      );
 
       if (parseInt(user?.user_id) === parseInt(data?.reciveId)) {
-        console.log("User matched! Processing notification for keyId:", data.keyId);
-        setKeyId(data.keyId);
-        setTopic(data.topic);
-        setNotifyId(data.notifyId);
+        console.log(
+          "User matched! Processing notification for keyId:",
+          data.keyId
+        );
 
-        loadExistingNotifications();
-        
+        // แยกการจัดการตาม topic
+        if (data.topic === "reset_count" || data.topic === "update_count") {
+          // สำหรับ reset_count/update_count ไม่ต้องโหลดใหม่ แค่อัพเดทเลข
+          console.log("Handling count reset, not reloading notifications");
+          setUnreadCount(data.unreadCount || 0);
+          localStorage.setItem(
+            "unreadCount",
+            (data.unreadCount || 0).toString()
+          );
+        } else {
+          // สำหรับ notification ใหม่ (new_booking, etc.)
+          // Rate limit: ไม่ให้โหลดบ่อยกว่า 2 วินาที
+          const now = Date.now();
+          if (now - lastLoadTime.current < 2000) {
+            console.log("Rate limited: skipping notification reload");
+            return;
+          }
+          lastLoadTime.current = now;
 
+          setKeyId(data.keyId);
+          setTopic(data.topic);
+          setNotifyId(data.notifyId);
+          loadExistingNotifications();
+        }
       } else {
         console.log("Skipping notification (user not matched)");
       }
@@ -132,27 +183,47 @@ const loadExistingNotifications = async () => {
       console.log("Disconnecting socket");
       socket.disconnect();
     };
-  }, [API_URL, user?.user_id,]);
+  }, [API_URL, user?.user_id, loadExistingNotifications]);
 
-  // แก้ handleBellClick เพื่อ mark as read
+  // แก้ handleBellClick - เพียงแค่เปิด/ปิด dropdown
   const handleBellClick = () => {
     setIsNotifyOpen((prev) => !prev);
-    
-    // Mark notifications as read
-    if (!isNotifyOpen) {
-      setNotifications(prev => 
-        prev.map(notification => ({ ...notification, setNo: true }))
-      );
-      
-      
-      
-      // อัปเดตสถานะ read ในฐานข้อมูล (ถ้ามี API)
-      if (user?.user_id) {
-        fetch(`${API_URL}/notification/mark-read/${user.user_id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        }).catch(err => console.log("Mark as read error:", err));
+    // ไม่ mark as read ที่นี่แล้ว - ให้รอกดเข้าไปดูรายละเอียดแทน
+  };
+
+  // ฟังก์ชันสำหรับ mark notification เป็น read เมื่อคลิกดู
+  const handleNotificationClick = (notification) => {
+    // mark notification นี้เป็น read
+    setNotifications((prev) =>
+      prev.map((n) =>
+        n.notifyId === notification.notifyId
+          ? { ...n, isRead: true, status: "read" }
+          : n
+      )
+    );
+
+    // ลดจำนวน unread count และเก็บใน localStorage
+    setUnreadCount((prev) => {
+      const newCount = Math.max(0, prev - 1);
+      localStorage.setItem("unreadCount", newCount.toString());
+      return newCount;
+    });
+
+    // นำทางไปยังหน้าที่เหมาะสม
+    if (notification.topic === "new_booking") {
+      if (notification.keyId) {
+        router.push(`/booking-detail/${notification.keyId}`);
+      } else {
+        alert("ไม่พบข้อมูลการจองนี้");
       }
+    } else if (notification.topic === "new_post") {
+      if (notification.keyId) {
+        // router.push(`/post-detail/${notification.keyId}`);
+      } else {
+        alert("ไม่พบข้อมูลโพสต์นี้");
+      }
+    } else {
+      router.push(`/notifications/${user?.user_id}`);
     }
   };
 
@@ -207,6 +278,43 @@ const loadExistingNotifications = async () => {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+  const formatDate = (isoString) => {
+    const date = new Date(isoString);
+    return date.toLocaleDateString("th-TH", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  };
+  const getCancelDeadlineTime = (start_date, start_time, cancel_hours) => {
+    if (
+      !start_date ||
+      !start_time ||
+      cancel_hours === undefined ||
+      cancel_hours === null
+    ) {
+      return "-";
+    }
+
+    const cleanDate = start_date.includes("T")
+      ? start_date.split("T")[0]
+      : start_date;
+
+    const bookingDateTime = new Date(`${cleanDate}T${start_time}+07:00`);
+
+    if (isNaN(bookingDateTime.getTime())) {
+      console.log(" Invalid Date from:", cleanDate, start_time);
+      return "-";
+    }
+
+    bookingDateTime.setHours(bookingDateTime.getHours() - cancel_hours);
+
+    return bookingDateTime.toLocaleTimeString("th-TH", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  };
 
   return (
     <nav className="nav">
@@ -440,7 +548,7 @@ const loadExistingNotifications = async () => {
             </div>
           </div>
         )}
-         {user && (
+        {user && (
           <div className="notify">
             <button
               className="icon-btn notify-btn"
@@ -458,54 +566,62 @@ const loadExistingNotifications = async () => {
             </button>
 
             {isNotifyOpen && (
-              <div className="notify-dropdown" ref={notifyRef} >
+              <div className="notify-dropdown" ref={notifyRef}>
                 <ul>
                   {notifications.length > 0 ? (
                     notifications.map((notification, index) => (
                       <li
                         key={`${notification.notifyId}-${index}`}
-                        className={!notification.isRead ? 'unread' : ''}
-                        onClick={() => {
-                          if (notification.topic === "new_booking") {
-                            if (notification.keyId) {
-                              router.push(`/booking-detail/${notification.keyId}`);
-                            } else {
-                              alert("ไม่พบข้อมูลการจองนี้");
-                            }
-                          } else if (notification.topic === "new_post") {
-                            if (notification.keyId) {
-                              // router.push(`/post-detail/${notification.keyId}`);
-                            } else {
-                              alert("ไม่พบข้อมูลโพสต์นี้");
-                            }
-                          } else {
-                            router.push(`/notifications/${user?.user_id}`);
-                          }
-                        }}
+                        className={!notification.isRead ? "unread" : ""}
+                        onClick={() => handleNotificationClick(notification)}
                         style={{
-                          cursor: 'pointer',
-                          backgroundColor: !notification.isRead ? '#f0f8ff' : 'transparent',
-                          borderLeft: !notification.isRead ? '3px solid #007bff' : 'none',
-                          padding: '8px 12px',
-                          borderBottom: '1px solid #eee'
+                          cursor: "pointer",
+                          backgroundColor: !notification.isRead
+                            ? "#f0f8ff"
+                            : "transparent",
+                          borderLeft: !notification.isRead
+                            ? "3px solid #007bff"
+                            : "none",
+                          padding: "8px 12px",
+                          borderBottom: "1px solid #eee",
                         }}
                       >
                         {notification.customerName ? (
                           <>
-                            <strong>การจองจาก {notification.customerName}</strong>
+                            <strong>มีการจองสนามใหม่</strong>
                             <br />
-                            <small>{notification.fieldName} - {notification.subFieldName}</small>
+                            <small>ผู้จอง: {notification.message}</small>
                             <br />
-                            <small>{notification.bookingDate} {notification.startTime}-{notification.endTime}</small>
+                            <small>
+                              สนาม: {notification.fieldName} <br /> สนามย่อย:{" "}
+                              {notification.subFieldName}
+                            </small>
+                            <br />
+                            <small>
+                              วันที่: {""}
+                              {formatDate(notification.bookingDate)}
+                              <br />
+                              เวลา: {notification.startTime} - 
+                              {notification.endTime}
+                            </small>
                           </>
                         ) : (
                           `การจอง #${notification.bookingId} ใหม่`
                         )}
-                        <span className="time" style={{ display: 'block', fontSize: '0.8em', color: '#666', marginTop: '4px' }}>
-                          {notification.created_at 
-                            ? new Date(notification.created_at).toLocaleString('th-TH')
-                            : 'เมื่อสักครู่'
-                          }
+                        <span
+                          className="time-ago"
+                          style={{
+                            display: "block",
+                            fontSize: "0.8em",
+                            color: "#666",
+                            marginTop: "4px",
+                          }}
+                        >
+                          {notification.created_at
+                            ? new Date(notification.created_at).toLocaleString(
+                                "th-TH"
+                              )
+                            : "เมื่อสักครู่"}
                         </span>
                       </li>
                     ))
@@ -513,20 +629,20 @@ const loadExistingNotifications = async () => {
                     <li>ไม่มีการแจ้งเตือน</li>
                   )}
                 </ul>
-                <button 
+                <button
                   onClick={() => {
                     setIsNotifyOpen(false);
                     router.push(`/notifications/${user?.user_id}`);
                   }}
                   style={{
-                    width: '100%',
-                    padding: '8px',
-                    background: '#f8f9fa',
-                    border: 'none',
-                    borderTop: '1px solid #dee2e6',
-                    cursor: 'pointer',
-                    color: '#007bff',
-                    fontWeight: '500'
+                    width: "100%",
+                    padding: "8px",
+                    background: "#f8f9fa",
+                    border: "none",
+                    borderTop: "1px solid #dee2e6",
+                    cursor: "pointer",
+                    color: "#007bff",
+                    fontWeight: "500",
                   }}
                 >
                   ดูทั้งหมด

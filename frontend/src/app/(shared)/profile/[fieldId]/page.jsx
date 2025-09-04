@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import NotFoundCard from "@/app/components/NotFoundCard";
 import "@/app/css/field-profile.css";
 import Post from "@/app/components/Post";
 import dayjs from "dayjs";
@@ -9,6 +10,7 @@ import "dayjs/locale/th";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { usePreventLeave } from "@/app/hooks/usePreventLeave";
+import LongdoMapPicker from "@/app/components/LongdoMapPicker";
 
 dayjs.extend(relativeTime);
 dayjs.locale("th");
@@ -42,7 +44,9 @@ export default function CheckFieldDetail() {
   const [reviewData, setReviewData] = useState([]);
   const [selectedRating, setSelectedRating] = useState("ทั้งหมด");
   const [currentPage, setCurrentPage] = useState(1);
+  const [highlightMissing, setHighlightMissing] = useState(false);
   usePreventLeave(startProcessLoad);
+  const [notFoundFlag, setNotFoundFlag] = useState(false);
   const [showSubfieldModal, setShowSubfieldModal] = useState(false);
 
   useEffect(() => {
@@ -69,6 +73,37 @@ export default function CheckFieldDetail() {
   }, [isLoading, user, postData, highlightId, user]);
 
   useEffect(() => {
+    const readNotifications = async () => {
+      if (!API_URL || !fieldId) return;
+      try {
+        const keyToMark = highlightId ? Number(highlightId) : Number(fieldId);
+        if (!keyToMark) return;
+        const res = await fetch(`${API_URL}/notification/read-notification`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key_id: keyToMark }),
+        });
+
+        if (res.ok) {
+          console.log("Notifications marked as read for key_id:", keyToMark);
+          window.dispatchEvent(
+            new CustomEvent("notifications-marked-read", {
+              detail: { key_id: keyToMark },
+            })
+          );
+        } else {
+          console.warn("Mark read failed:", await res.text());
+        }
+      } catch (error) {
+        console.error("Error marking notifications as read:", error);
+      }
+    };
+
+    readNotifications();
+  }, [API_URL, fieldId, highlightId]);
+
+  useEffect(() => {
     if (!fieldId) return;
 
     const fetchFieldData = async () => {
@@ -87,19 +122,19 @@ export default function CheckFieldDetail() {
 
         if (res.ok) {
           setFieldData(data.data);
+        } else if (res.status === 404) {
+          setNotFoundFlag(true);
+          return;
         } else {
           setMessage("ไม่สามารถดึงข้อมูลได้");
           setMessageType("error");
-          setTimeout(() => {
-            router.replace("/");
-          }, 2000);
           return;
         }
         const fieldName = sessionStorage.setItem(
           "field_name",
           data.data.field_name
         );
-        const fieldOwnerId = data.user_id;
+        const fieldOwnerId = data.data?.user_id;
         const currentUserId = user?.user_id;
         const currentUserRole = user?.role;
 
@@ -143,8 +178,15 @@ export default function CheckFieldDetail() {
         const data = await res.json();
         if (data.message === "ไม่มีโพส") {
           setPostData([]);
+          if (highlightId) setHighlightMissing(true);
         } else if (res.ok) {
           setPostData(data.data);
+          if (highlightId) {
+            const exists = data.data.some(
+              (p) => String(p.post_id) === String(highlightId)
+            );
+            if (!exists) setHighlightMissing(true);
+          }
           console.log(data.data);
         } else {
           console.error("Backend error:", data.error);
@@ -344,7 +386,7 @@ export default function CheckFieldDetail() {
         setMessageType("error");
       }
     } catch (err) {
-      setMessage("ไม่สามารถเชือมต่อกับเซิร์ฟเวอร์ได้", error);
+      setMessage("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้", error);
       setMessageType("error");
     } finally {
       SetstartProcessLoad(false);
@@ -376,7 +418,7 @@ export default function CheckFieldDetail() {
       }
     } catch (error) {
       console.error("Delete error:", error);
-      setMessage("ไม่สามารถเชือมต่อกับเซิร์ฟเวอร์ได้", error);
+      setMessage("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้", error);
       setMessageType("error");
     } finally {
       SetstartProcessLoad(false);
@@ -424,6 +466,15 @@ export default function CheckFieldDetail() {
     return "#";
   };
 
+  // เพิ่มฟังก์ชันสำหรับ Longdo Map
+  const getLongdoMapLink = (gpsLocation) => {
+    const coords = extractLatLngFromUrl(gpsLocation);
+    if (!coords) return null;
+
+    const [lat, lon] = coords.split(",");
+    return `https://map.longdo.com/search/${lat},${lon}`;
+  };
+
   const formatPrice = (value) => new Intl.NumberFormat("th-TH").format(value);
 
   useEffect(() => {
@@ -444,6 +495,19 @@ export default function CheckFieldDetail() {
       </div>
     );
 
+  if (!dataLoading && notFoundFlag) {
+    return (
+      <NotFoundCard
+        title="ไม่พบสนามนี้"
+        description={
+          "สนามที่คุณพยายามเข้าถึงอาจถูกลบ ปิดใช้งาน หรือไม่มีอยู่จริง\nหากมาจากการแจ้งเตือนเก่า สนามอาจถูกลบแล้ว"
+        }
+        primaryLabel="กลับหน้าแรก"
+        onPrimary={() => router.replace("/")}
+      />
+    );
+  }
+
   const handleFilterChange = (e) => {
     setSelectedRating(e.target.value);
   };
@@ -455,6 +519,13 @@ export default function CheckFieldDetail() {
 
   const handleCancel = () => {
     setShowSubfieldModal(false);
+  };
+
+  const clearHighlight = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("highlight");
+    router.replace(`?${params.toSwtring()}`, { scroll: false });
+    setHighlightMissing(false);
   };
 
   return (
@@ -891,20 +962,15 @@ export default function CheckFieldDetail() {
               <strong>ที่อยู่:</strong> {fieldData?.address}
             </p>
 
-            {fieldData?.gps_location ? (
+                       {fieldData?.gps_location ? (
               <div style={{ marginTop: "10px" }}>
-                <iframe
-                  width="100%"
-                  height="250"
-                  style={{ border: 0, borderRadius: "8px" }}
-                  loading="lazy"
-                  allowFullScreen
-                  referrerPolicy="no-referrer-when-downgrade"
-                  src={`https://www.google.com/maps/embed/v1/directions?key=${MAPS_EMBED_API}&destination=${coordinates}&origin=current+location`}
-                ></iframe>
-
+                <LongdoMapPicker
+                  initialLocation={coordinates}
+                  readOnly={true}
+                />
+                
                 <a
-                  href={getGoogleMapsLink(fieldData.gps_location)}
+                  href={getLongdoMapLink(fieldData.gps_location)}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
@@ -925,7 +991,7 @@ export default function CheckFieldDetail() {
                     fontWeight: "bold",
                   }}
                 >
-                  เปิดใน Google Maps
+                  เปิดใน Longdo Map
                 </a>
               </div>
             ) : (
@@ -979,16 +1045,52 @@ export default function CheckFieldDetail() {
                 facilities.length === 0 ? (
                   <p>ยังไม่มีสิ่งอำนวยความสะดวกสำหรับสนามนี้</p>
                 ) : (
-                  <div className="facbox-profile">
-                    {facilities.map((facility, index) => (
-                      <div
-                        className="facitem-profile"
-                        key={`${facility.fac_id}-${index}`}
-                      >
-                        <strong>{facility.fac_name}</strong>:{" "}
-                        <span>{formatPrice(facility.fac_price)} บาท</span>
-                      </div>
-                    ))}
+                  <div className="facilities-carousel-container-profile">
+                    <div className="facilities-carousel-profile">
+                      {facilities.map((facility, index) => (
+                        <div
+                          key={`${facility.fac_id}-${index}`}
+                          className="facility-card-profile-vertical"
+                        >
+                          <div className="facility-image-container-profile-vertical">
+                            {facility.image_path ? (
+                              <img
+                                src={facility.image_path}
+                                alt={facility.fac_name}
+                                className="facility-image-profile-vertical"
+                                onError={(e) => {
+                                  e.target.style.display = "none";
+                                  e.target.nextSibling.style.display = "flex";
+                                }}
+                              />
+                            ) : null}
+                            <div
+                              className="facility-no-image-profile-vertical"
+                              style={{
+                                display: facility.image_path ? "none" : "flex",
+                              }}
+                            >
+                              <span>ไม่มีรูปภาพ</span>
+                            </div>
+                          </div>
+
+                          <div className="facility-info-profile-vertical">
+                            <h5 className="facility-name-profile-vertical">
+                              {facility.fac_name}
+                            </h5>
+                            <p className="facility-price-profile-vertical">
+                              ราคา: {formatPrice(facility.fac_price)} บาท
+                            </p>
+                            <p className="facility-quantity-profile-vertical">
+                              จำนวนทั้งหมด: {facility.quantity_total}
+                            </p>
+                            <p className="facility-quantity-profile-vertical">
+                              รายละเอียด: {facility.description}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )
               ) : (

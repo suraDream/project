@@ -190,18 +190,11 @@ router.put("/read-all-notification", authMiddleware, async (req, res) => {
       `SELECT COUNT(*)::int AS unread_count FROM notifications WHERE recive_id = $1 AND status = 'unread'`,
       [user_id]
     );
-    const unreadCount = countResult.rows[0]?.unread_count ?? 0;
+    // const unreadCount = countResult.rows[0]?.unread_count ?? 0;
 
-    // emit reset_count so frontend can set unread = 0 (หรือใช้ unreadCount)
-    if (req && req.io) {
-      req.io.emit("new_notification", {
-        topic: "reset_count",
-        reciveId: Number(user_id),
-        unreadCount,
-      });
-    }
 
-    res.status(200).json({ message: "Notifications marked as read", updated: result.rowCount, unreadCount });
+
+    res.status(200).json({ message: "Notifications marked as read", updated: result.rowCount });
   } catch (error) {
     console.error("Error marking all notifications as read:", error);
     res.status(500).json({ error: "Internal server error" });
