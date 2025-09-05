@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import Script from 'next/script'
 import '../css/map.css'
 
-export default function LongdoMapPicker({ onLocationSelect, initialLocation, readOnly = false }) {
+export default function LongdoMapPicker({ onLocationSelect, initialLocation, readOnly = false, onMapReady }) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
   const markerRef = useRef(null)
@@ -24,6 +24,9 @@ export default function LongdoMapPicker({ onLocationSelect, initialLocation, rea
     })
     map.Ui.Crosshair.visible(false)
     mapInstance.current = map
+
+    // notify parent that map is ready
+    try { onMapReady?.() } catch (e) { console.warn('onMapReady error', e) }
 
     // bind click only when NOT readOnly
     if (!readOnly) {

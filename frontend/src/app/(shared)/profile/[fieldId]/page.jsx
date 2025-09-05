@@ -466,14 +466,8 @@ export default function CheckFieldDetail() {
     return "#";
   };
 
-  // เพิ่มฟังก์ชันสำหรับ Longdo Map
-  const getLongdoMapLink = (gpsLocation) => {
-    const coords = extractLatLngFromUrl(gpsLocation);
-    if (!coords) return null;
 
-    const [lat, lon] = coords.split(",");
-    return `https://map.longdo.com/search/${lat},${lon}`;
-  };
+
 
   const formatPrice = (value) => new Intl.NumberFormat("th-TH").format(value);
 
@@ -970,7 +964,7 @@ export default function CheckFieldDetail() {
                 />
                 
                 <a
-                  href={getLongdoMapLink(fieldData.gps_location)}
+                  href={getGoogleMapsLink(fieldData.gps_location)}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
@@ -991,7 +985,7 @@ export default function CheckFieldDetail() {
                     fontWeight: "bold",
                   }}
                 >
-                  เปิดใน Longdo Map
+                  เปิดใน Google Map
                 </a>
               </div>
             ) : (

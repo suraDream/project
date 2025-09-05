@@ -1993,7 +1993,7 @@ export default function CheckFieldDetail() {
                       disabled={startProcessLoad}
                       className="edit-btn-inline"
                       onClick={() =>
-                        startEditing("gps_location", field?.gps_location)
+                        router.push(`/map/${field.field_id}`)
                       }
                     >
                       แก้ไข
