@@ -1,5 +1,3 @@
-const { notify } = require("./register");
-
 module.exports = function (io) {
   const express = require("express");
   const pool = require("../db");
@@ -19,7 +17,7 @@ module.exports = function (io) {
 
   const LimiterBookingsRequest = rateLimit({
     windowMs: 10 * 60 * 1000,
-    max: 10,
+    max: 100,
     standardHeaders: true,
     legacyHeaders: false,
 
@@ -252,26 +250,27 @@ module.exports = function (io) {
           }
         }
 
-        const expired = await pool.query(
-          `
-            DELETE FROM bookings b
-            USING users u, field f
-            WHERE b.user_id = u.user_id
-              AND b.field_id = f.field_id
-              AND b.status IN ('approved', 'complete')
-              AND f.price_deposit > 0
-              AND b.booking_id NOT IN (SELECT booking_id FROM payment)
-              AND (
-                $1 > b.updated_at + INTERVAL '60 minutes'
-                OR (
-                  b.updated_at > (b.start_date || ' ' || b.start_time)::timestamp - INTERVAL '10 minutes'
-                  AND $1 >= (b.start_date || ' ' || b.start_time)::timestamp
-                )
-              )
-            RETURNING b.booking_id, u.email, f.field_name, b.start_time, b.start_date;
-`,
-          [now.toISO()]
-        );
+const expired = await pool.query(
+  `
+    UPDATE bookings b
+    SET status = 'rejected'
+    FROM users u, field f
+    WHERE b.user_id = u.user_id
+      AND b.field_id = f.field_id
+      AND b.status IN ('approved', 'complete')
+      AND f.price_deposit > 0
+      AND b.booking_id NOT IN (SELECT booking_id FROM payment)
+      AND (
+        $1 > b.updated_at + INTERVAL '60 minutes'
+        OR (
+          b.updated_at > (b.start_date || ' ' || b.start_time)::timestamp - INTERVAL '10 minutes'
+          AND $1 >= (b.start_date || ' ' || b.start_time)::timestamp
+        )
+      )
+    RETURNING b.booking_id, u.email, f.field_name, b.start_time, b.start_date;
+  `,
+  [now.toISO()]
+);
 
         if (expired.rows.length > 0) {
           for (const row of expired.rows) {
@@ -387,65 +386,62 @@ module.exports = function (io) {
             .json({ success: false, message: "Invalid startDate or endDate" });
         }
 
-const overlapResult = await client.query(
-  `SELECT * FROM bookings
-    WHERE sub_field_id = $1
-      AND status NOT IN ('rejected')
-      AND (
-        (start_date || ' ' || start_time)::timestamp < $3::timestamp
-        AND (end_date || ' ' || end_time)::timestamp > $2::timestamp
-      )
-    FOR UPDATE`,
-  [subFieldId, `${startDate} ${startTime}`, `${endDate} ${endTime}`]
-);
-
-      const timeNow = DateTime.now().setZone("Asia/Bangkok");
-      const timSubmit = `${startDate}T${startTime}`;
-      const timeSubmitDate = DateTime.fromISO(timSubmit, {
-        zone: "Asia/Bangkok",
-      });
-
-      if (timeSubmitDate < timeNow) {
-        await client.query("ROLLBACK");
-        return res.status(400).json({
-          success: false,
-          message: "ไม่สามารถเลือกเวลาที่ผ่านไปแล้วได้",
-        });
-      }
-
-      if (overlapResult.rows.length > 0) {
-        await client.query("ROLLBACK");
-        return res.status(400).json({
-          success: false,
-          message: "ช่วงเวลาที่เลือกมีผู้จองแล้ว กรุณาเลือกเวลาใหม่",
-        });
-      }
-
-      // เช็คจำนวนสิ่งอำนวยความสะดวก (ใช้ field_fac_id แบบเดิม)
-      for (const facility of selectedFacilities || []) {
-        // ใช้ field_fac_id ที่ส่งมาจาก frontend โดยตรง
-        const facInfoRes = await client.query(
-          `SELECT field_fac_id, quantity_total, fac_name 
-           FROM field_facilities 
-           WHERE field_fac_id = $1 
-           FOR UPDATE`,
-          [facility.field_fac_id]
+        const overlapResult = await client.query(
+          `SELECT * FROM bookings
+          WHERE sub_field_id = $1
+            AND status NOT IN ('rejected')
+            AND (
+              (start_date || ' ' || start_time)::timestamp < $3::timestamp
+              AND (end_date || ' ' || end_time)::timestamp > $2::timestamp
+            )
+          FOR UPDATE`,
+          [subFieldId, `${startDate} ${startTime}`, `${endDate} ${endTime}`]
         );
 
-        if (facInfoRes.rows.length === 0) {
+        const timeNow = DateTime.now().setZone("Asia/Bangkok");
+        const timSubmit = `${startDate}T${startTime}`;
+        const timeSubmitDate = DateTime.fromISO(timSubmit, {
+          zone: "Asia/Bangkok",
+        });
+
+        if (timeSubmitDate < timeNow) {
           await client.query("ROLLBACK");
           return res.status(400).json({
             success: false,
-            message: `ไม่พบสิ่งอำนวยความสะดวก "${facility.fac_name}" ในสนามนี้`,
+            message: "ไม่สามารถเลือกเวลาที่ผ่านไปแล้วได้",
           });
         }
 
-        const { field_fac_id, quantity_total, fac_name } = facInfoRes.rows[0];
-        const quantityTotal = parseInt(quantity_total || 1, 10);
+        if (overlapResult.rows.length > 0) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({
+            success: false,
+            message: "ช่วงเวลาที่เลือกมีผู้จองแล้ว กรุณาเลือกเวลาใหม่",
+          });
+        }
 
-        // นับจำนวนที่จองแล้วในช่วงเวลานี้
-        const facBookedRes = await client.query(
-          `SELECT COALESCE(SUM(bf.quantity), 0) AS booked_qty
+        for (const facility of selectedFacilities || []) {
+          const facInfoRes = await client.query(
+            `SELECT field_fac_id, quantity_total, fac_name 
+           FROM field_facilities 
+           WHERE field_fac_id = $1 
+           FOR UPDATE`,
+            [facility.field_fac_id]
+          );
+
+          if (facInfoRes.rows.length === 0) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({
+              success: false,
+              message: `ไม่พบสิ่งอำนวยความสะดวก "${facility.fac_name}" ในสนามนี้`,
+            });
+          }
+
+          const { field_fac_id, quantity_total, fac_name } = facInfoRes.rows[0];
+          const quantityTotal = parseInt(quantity_total || 1, 10);
+
+          const facBookedRes = await client.query(
+            `SELECT COALESCE(SUM(bf.quantity), 0) AS booked_qty
            FROM booking_fac bf
            JOIN bookings b ON bf.booking_id = b.booking_id
            WHERE bf.field_fac_id = $1
@@ -455,27 +451,26 @@ const overlapResult = await client.query(
                (b.start_date || ' ' || b.start_time)::timestamp < $4::timestamp
                AND (b.end_date || ' ' || b.end_time)::timestamp > $3::timestamp
              )`,
-          [
-            field_fac_id,
-            fieldId,
-            `${startDate} ${startTime}`,
-            `${endDate} ${endTime}`,
-          ]
-        );
+            [
+              field_fac_id,
+              fieldId,
+              `${startDate} ${startTime}`,
+              `${endDate} ${endTime}`,
+            ]
+          );
 
-        const bookedQty = parseInt(facBookedRes.rows[0]?.booked_qty || 0, 10);
-        const requestedQty = parseInt(facility.quantity || 1, 10);
+          const bookedQty = parseInt(facBookedRes.rows[0]?.booked_qty || 0, 10);
+          const requestedQty = parseInt(facility.quantity || 1, 10);
 
-        if (bookedQty + requestedQty > quantityTotal) {
-          await client.query("ROLLBACK");
-          return res.status(400).json({
-            success: false,
-            message: `สิ่งอำนวยความสะดวก "${fac_name}" ถูกจองเต็มจำนวนในช่วงเวลานี้แล้ว (${bookedQty}/${quantityTotal})`,
-            conflict_facility: fac_name,
-          });
+          if (bookedQty + requestedQty > quantityTotal) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({
+              success: false,
+              message: `สิ่งอำนวยความสะดวก "${fac_name}" ถูกจองเต็มจำนวนในช่วงเวลานี้แล้ว (${bookedQty}/${quantityTotal})`,
+              conflict_facility: fac_name,
+            });
+          }
         }
-      }
-
 
         const bookingResult = await client.query(
           `INSERT INTO bookings (field_id, user_id, sub_field_id, booking_date, start_time, end_time, total_hours, total_price, pay_method, total_remaining, activity, status, start_date, end_date, selected_slots)
@@ -505,11 +500,16 @@ const overlapResult = await client.query(
           [fieldId]
         );
 
-          for (const facility of selectedFacilities) {
+        for (const facility of selectedFacilities) {
           await client.query(
             `INSERT INTO booking_fac (booking_id, field_fac_id, fac_name, quantity) 
          VALUES ($1, $2, $3, $4) `,
-            [bookingId, facility.field_fac_id, facility.fac_name, Number(facility.quantity || 1)]
+            [
+              bookingId,
+              facility.field_fac_id,
+              facility.fac_name,
+              Number(facility.quantity || 1),
+            ]
           );
         }
 
@@ -581,28 +581,44 @@ const overlapResult = await client.query(
             }
           }
         }
-
-     const notifyData = await client.query(
-  `INSERT INTO notifications (sender_id, recive_id, topic, messages, key_id, status)
+        const notifyData = await client.query(
+          `INSERT INTO notifications (sender_id, recive_id, topic, messages, key_id, status)
    VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-  [userId, ownerId.rows[0].user_id, "new_booking", "มีการจองใหม่", bookingId, "unread"]
-);
+          [
+            userId,
+            ownerId.rows[0].user_id,
+            "new_booking",
+            "มีการจองใหม่",
+            bookingId,
+            "unread",
+          ]
+        );
 
         await client.query("COMMIT");
-      
-     if (req.io) {
-  req.io.emit("slot_booked", {
-    subFieldId: subFieldId,
-    bookingDate: bookingDate,
-  });
 
-  req.io.emit("new_notification", {
-    notifyId: notifyData.rows[0].notify_id,
-    topic: "new_booking",
-    reciveId: ownerId.rows[0].user_id,
-    keyId: bookingId,
-  });
-}
+        if (req.io) {
+          req.io.emit("slot_booked", {
+            subFieldId: subFieldId,
+            bookingDate: bookingDate,
+          });
+        }
+
+        if (req.io) {
+          req.io.emit("new_notification", {
+            notifyId: notifyData.rows[0].notify_id,
+            topic: "new_booking",
+            reciveId: ownerId.rows[0].user_id,
+            keyId: bookingId,
+          });
+        }
+
+        await client.query("COMMIT");
+        console.log(" emitting slot_booked", bookingId);
+        if (req.io) {
+          req.io.emit("slot_booked", {
+            bookingId,
+          });
+        }
 
         console.log("Booking saved successfully");
         res.status(200).json({ message: "Booking saved successfully" });
@@ -722,7 +738,7 @@ const overlapResult = await client.query(
         i++;
       }
 
-      query += ` ORDER BY b.booking_date ASC, b.start_time ASC`;
+      query += ` ORDER BY b.booking_date DESC, b.start_time ASC`;
 
       const bookingResult = await pool.query(query, values);
 
@@ -831,7 +847,7 @@ WHERE b.field_id = $1
         paramIndex++;
       }
 
-      query += ` ORDER BY b.booking_date ASC, b.start_time ASC`;
+      query += ` ORDER BY b.booking_date DESC, b.start_time ASC`;
 
       const result = await pool.query(query, values);
 
@@ -1034,10 +1050,7 @@ LIMIT 1;
           let subject = "";
           let message = "";
 
-          if (
-            booking_status === "approved" &&
-            filedData.rows[0].price_deposit > 0
-          ) {
+          if (booking_status === "approved") {
             subject = `การจองสนาม ${userInfo.field_name} ได้รับการอนุมัติแล้ว`;
             message = `
 <div style="font-family: 'Kanit', sans-serif; max-width: 600px; margin: 10px auto; padding: 20px; background-color: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb; margin-top:80px;box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);">
@@ -1073,45 +1086,32 @@ LIMIT 1;
   </p>
 </div>
         `;
-          } else if (
-            booking_status === "approved" &&
-            filedData.rows[0].price_deposit == 0
-          ) {
-            subject = `การจองสนาม ${userInfo.field_name} ได้รับการอนุมัติแล้ว`;
-            message = `
-<div style="font-family: 'Kanit', sans-serif; max-width: 600px; margin: 10px auto; padding: 20px; background-color: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb; margin-top:80px;box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0">
-    <tr>
-      <td align="center">
-        <img src="https://res.cloudinary.com/dlwfuul9o/image/upload/v1750926689/logo2small_lzsrwa.png" alt="Sport-Hub Online Logo" style="display: block; max-width: 300px; margin-bottom: 10px;" />
-      </td>
-    </tr>
-  </table>
-  <h1 style="color: #347433; margin-bottom: 16px; text-align: center;">การจองของคุณได้รับการอนุมัติแล้ว</h1>
-
-  <p style="font-size: 16px; color: #111827; text-align: center;">
-    การจองสนาม <strong>${userInfo.field_name}</strong> ของคุณได้รับการอนุมัติแล้ว
-  </p>
-
-  <div style="margin: 20px auto;">
-    <a href="${process.env.FONT_END_URL}/login?redirect=/booking-detail/${booking_id}" style="background-color: #03045e; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; text-align: center;  justify-content: center;  display: flex; width: 200px; margin: 10px auto; 
-  align-items: center;
-"target="_blank">
-      ดูรายละเอียดการจอง #${booking_id}
-    </a>
-  </div>
-
-  <p style="font-size: 14px; color: #6b7280; text-align: center">
-    กรุณาแนบสลิปมัดจำ <strong>(ถ้ามี)</strong> ภายใน <strong>1 ชั่วโมง</strong> หลังจากได้รับการอนุมัติ มิฉะนั้นระบบจะยกเลิกการจองโดยอัตโนมัติ
-  </p>
-
-  <hr style="margin: 24px 0; border: none; border-top: 1px solid #e5e7eb;" />
-
-  <p style="font-size: 12px; color: #9ca3af;text-align: center">
-    หากคุณไม่ได้เป็นผู้ดำเนินการ กรุณาเพิกเฉยต่ออีเมลฉบับนี้
-  </p>
-</div>
-        `;
+            try {
+              const notifyInsert = await pool.query(
+                `INSERT INTO notifications (sender_id, recive_id, topic, messages, key_id, status)
+                 VALUES ($1,$2,$3,$4,$5,'unread') RETURNING notify_id`,
+                [
+                  req.user?.user_id || null,
+                  booking.user_id,
+                  "booking_approved",
+                  "การจองของคุณได้รับการอนุมัติแล้ว",
+                  booking.booking_id,
+                ]
+              );
+              if (req.io) {
+                req.io.emit("new_notification", {
+                  notifyId: notifyInsert.rows[0].notify_id,
+                  topic: "booking_approved",
+                  reciveId: booking.user_id,
+                  keyId: booking.booking_id,
+                });
+              }
+            } catch (notifyErr) {
+              console.error(
+                "Insert booking_approved notification failed:",
+                notifyErr.message
+              );
+            }
           } else if (booking_status === "rejected") {
             subject = `การจองสนาม ${userInfo.field_name} ไม่ได้รับการอนุมัติ`;
             message = `
@@ -1159,6 +1159,89 @@ LIMIT 1;
   </p>
 </div>
 `;
+            try {
+              const notifyInsert = await pool.query(
+                `INSERT INTO notifications (sender_id, recive_id, topic, messages, key_id, status)
+                 VALUES ($1,$2,$3,$4,$5,'unread') RETURNING notify_id`,
+                [
+                  req.user?.user_id || null,
+                  booking.user_id,
+                  "booking_rejected",
+                  reasoning,
+                  booking.booking_id,
+                ]
+              );
+              if (req.io) {
+                req.io.emit("new_notification", {
+                  notifyId: notifyInsert.rows[0].notify_id,
+                  topic: "booking_rejected",
+                  reciveId: booking.user_id,
+                  keyId: booking.booking_id,
+                });
+              }
+            } catch (notifyErr) {
+              console.error(
+                "Insert booking_rejected notification failed:",
+                notifyErr.message
+              );
+            }
+          } else if (booking_status === "complete") {
+            subject = `การจองสนาม ${userInfo.field_name} เสร็จสิ้น`;
+            message = `
+<div style="font-family: 'Kanit', sans-serif; max-width: 600px; margin: 10px auto; padding: 20px; background-color: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb; margin-top:80px;box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td align="center">
+        <img src="https://res.cloudinary.com/dlwfuul9o/image/upload/v1750926689/logo2small_lzsrwa.png" alt="Sport-Hub Online Logo" style="display: block; max-width: 300px; margin-bottom: 10px;" />
+      </td>
+    </tr>
+  </table>
+  <h1 style="color: #347433; margin-bottom: 16px; text-align: center;">การจองเสร็จสิ้น</h1>
+
+  <p style="font-size: 16px; color: #111827; text-align: center;">
+    การจองสนาม <strong>${userInfo.field_name}</strong> ของคุณเสร็จสิ้นเรียบร้อยแล้ว ขอบคุณที่ใช้บริการ
+  </p>
+
+  <div style="margin: 20px auto;">
+    <a href="${process.env.FONT_END_URL}/login?redirect=/booking-detail/${booking_id}" style=" background-color: #03045e; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; text-align: center;  justify-content: center;  display: flex; width: 200px; margin: 10px auto; 
+  align-items: center;" target="_blank">
+      ดูรายละเอียด #${booking_id}
+    </a>
+  </div>
+
+  <hr style="margin: 24px 0; border: none; border-top: 1px solid #e5e7eb;" />
+
+  <p style="font-size: 12px; color: #9ca3af;text-align: center">
+    หากคุณไม่ได้เป็นผู้ดำเนินการ กรุณาเพิกเฉยต่ออีเมลฉบับนี้
+  </p>
+</div>
+        `;
+            try {
+              const notifyInsert = await pool.query(
+                `INSERT INTO notifications (sender_id, recive_id, topic, messages, key_id, status)
+                 VALUES ($1,$2,$3,$4,$5,'unread') RETURNING notify_id`,
+                [
+                  req.user?.user_id || null,
+                  booking.user_id,
+                  "booking_complete",
+                  "การจองเสร็จสิ้น",
+                  booking.booking_id,
+                ]
+              );
+              if (req.io) {
+                req.io.emit("new_notification", {
+                  notifyId: notifyInsert.rows[0].notify_id,
+                  topic: "booking_complete",
+                  reciveId: booking.user_id,
+                  keyId: booking.booking_id,
+                });
+              }
+            } catch (notifyErr) {
+              console.error(
+                "Insert booking_complete notification failed:",
+                notifyErr.message
+              );
+            }
           }
 
           if (subject) {
@@ -1191,12 +1274,13 @@ LIMIT 1;
     }
   );
 
-  router.delete(
+  router.put(
     "/cancel-bookings/:booking_id",
     authMiddleware,
     async (req, res) => {
       const { booking_id } = req.params;
       const { cancel_time } = req.body;
+      const user_id = req.user.user_id;
 
       try {
         if (!cancel_time) {
@@ -1219,9 +1303,10 @@ LIMIT 1;
 
         const fieldDataResult = await pool.query(
           `
-        SELECT f.cancel_hours, b.start_date, b.start_time, b.end_time, f.field_name
+        SELECT f.cancel_hours, b.start_date, b.start_time, b.end_time, f.field_name, f.user_id as owner_id, b.user_id, u.email as user_email, u.first_name, u.last_name
         FROM bookings b
         JOIN field f ON b.field_id = f.field_id
+        JOIN users u ON u.user_id = b.user_id
         WHERE b.booking_id = $1
       `,
           [booking_id]
@@ -1245,8 +1330,19 @@ LIMIT 1;
           return new Intl.DateTimeFormat("th-TH", options).format(parsedDate);
         };
 
-        const { cancel_hours, start_date, start_time, end_time, field_name } =
-          fieldDataResult.rows[0];
+        const {
+          cancel_hours,
+          start_date,
+          start_time,
+          end_time,
+          field_name,
+          owner_id,
+          user_email,
+          first_name,
+          last_name,
+        } = fieldDataResult.rows[0];
+        const booking_user_id = fieldDataResult.rows[0].user_id; 
+        console.log("owner_id:", owner_id, " user_id:", user_id);
 
         let startDateStr;
         try {
@@ -1302,7 +1398,7 @@ LIMIT 1;
         console.log("startDateStr:", startDateStr);
         console.log("start_time:", start_time);
 
-        if (cancel_hours === null) {
+        if (cancel_hours === null || owner_id === user_id) {
           const paymentResult = await pool.query(
             `SELECT deposit_slip, total_slip FROM payment WHERE booking_id = $1`,
             [booking_id]
@@ -1320,9 +1416,38 @@ LIMIT 1;
           await pool.query(`DELETE FROM booking_fac WHERE booking_id = $1`, [
             booking_id,
           ]);
-          await pool.query(`DELETE FROM bookings WHERE booking_id = $1`, [
+          await pool.query(`UPDATE bookings SET status = 'rejected' WHERE booking_id = $1`, [
             booking_id,
-          ]);
+          ]);   
+
+          try {
+            const notifyData = await pool.query(
+              `INSERT INTO notifications (sender_id, recive_id, topic, messages, key_id, status)
+   VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+              [
+                owner_id,
+                booking_user_id, 
+                "booking_cancelled",
+                "การจองของคุณถูกยกเลิก",
+                booking_id,
+                "unread",
+              ]
+            );
+
+            if (req.io) {
+              req.io.emit("new_notification", {
+                notifyId: notifyData.rows[0].notify_id,
+                topic: "booking_cancelled",
+                reciveId: booking_user_id, 
+                keyId: booking_id,
+              });
+            }
+          } catch (notifyErr) {
+            console.error(
+              "Insert booking_cancelled notification failed:",
+              notifyErr.message
+            );
+          }
 
           return res.status(200).json({
             status: 1,
@@ -1365,6 +1490,34 @@ LIMIT 1;
             req.io.emit("slot_booked", {
               bookingId: booking_id,
             });
+          }
+          try {
+            const notifyData = await pool.query(
+              `INSERT INTO notifications (sender_id, recive_id, topic, messages, key_id, status)
+   VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+              [
+                booking_user_id, 
+                owner_id, 
+                "cancel_booking_by_customer",
+                "ลูกค้ายกเลิกการจองสนามของคุณ",
+                booking_id,
+                "unread",
+              ]
+            );
+
+            if (req.io) {
+              req.io.emit("new_notification", {
+                notifyId: notifyData.rows[0].notify_id,
+                topic: "cancel_booking_by_customer",
+                reciveId: owner_id, // ส่งให้เจ้าของสนาม
+                keyId: booking_id,
+              });
+            }
+          } catch (notifyErr) {
+            console.error(
+              "Insert cancel_booking_by_customer notification failed:",
+              notifyErr.message
+            );
           }
 
           return res.status(200).json({
@@ -1486,6 +1639,43 @@ LIMIT 1;
         );
 
         if (req.io) req.io.emit("slot_booked", { bookingId });
+
+        try {
+          const info = await client.query(
+            `SELECT b.user_id AS booker_id, f.user_id AS owner_id
+             FROM bookings b JOIN field f ON b.field_id = f.field_id
+             WHERE b.booking_id = $1 LIMIT 1`,
+            [bookingId]
+          );
+          if (info.rows.length > 0) {
+            const { booker_id, owner_id } = info.rows[0];
+            const msg = "มีการอัปโหลดสลิปมัดจำ";
+            const notifyInsert = await client.query(
+              `INSERT INTO notifications (sender_id, recive_id, topic, messages, key_id, status)
+               VALUES ($1,$2,$3,$4,$5,'unread') RETURNING notify_id`,
+              [
+                booker_id || null,
+                owner_id || null,
+                "deposit_payment_uploaded",
+                msg,
+                bookingId,
+              ]
+            );
+            if (req.io) {
+              req.io.emit("new_notification", {
+                notifyId: notifyInsert.rows[0].notify_id,
+                topic: "deposit_payment_uploaded",
+                reciveId: owner_id || null,
+                keyId: bookingId,
+              });
+            }
+          }
+        } catch (notifyErr) {
+          console.error(
+            "Insert deposit_payment_uploaded notification failed:",
+            notifyErr.message
+          );
+        }
 
         res.json({
           message: "Upload success",
@@ -1615,6 +1805,42 @@ LIMIT 1;
               console.log("Email sent:", emailRes);
             } catch (emailErr) {
               console.error("Email send error:", emailErr);
+            }
+            try {
+              const info = await client.query(
+                `SELECT b.user_id AS booker_id, f.user_id AS owner_id
+             FROM bookings b JOIN field f ON b.field_id = f.field_id
+             WHERE b.booking_id = $1 LIMIT 1`,
+                [bookingId]
+              );
+              if (info.rows.length > 0) {
+                const { booker_id, owner_id } = info.rows[0];
+                const msg = "มีการอัปโหลดสลิปยอดคงเหลือ";
+                const notifyInsert = await client.query(
+                  `INSERT INTO notifications (sender_id, recive_id, topic, messages, key_id, status)
+               VALUES ($1,$2,$3,$4,$5,'unread') RETURNING notify_id`,
+                  [
+                    booker_id || null,
+                    owner_id || null,
+                    "total_slip_payment_uploaded",
+                    msg,
+                    bookingId,
+                  ]
+                );
+                if (req.io) {
+                  req.io.emit("new_notification", {
+                    notifyId: notifyInsert.rows[0].notify_id,
+                    topic: "total_slip_payment_uploaded",
+                    reciveId: owner_id || null,
+                    keyId: bookingId,
+                  });
+                }
+              }
+            } catch (notifyErr) {
+              console.error(
+                "Insert deposit_payment_uploaded notification failed:",
+                notifyErr.message
+              );
             }
           }
         }

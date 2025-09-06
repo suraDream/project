@@ -68,7 +68,6 @@ const reviews = require("./api/reviews");
 const statistics = require("./api/statistics");
 const search = require("./api/search");
 const notification = require("./api/notification");
-
 app.get("/", (req, res) => {
   res.send("Welcome to the API");
 });

@@ -1,233 +1,290 @@
-'use client'
-import { useEffect, useRef, useState } from 'react'
-import Script from 'next/script'
-import '../css/map.css'
+"use client";
+import { useEffect, useRef, useState } from "react";
+import Script from "next/script";
+import "@/app/css/map.css";
 
-export default function LongdoMapPicker({ onLocationSelect, initialLocation, readOnly = false, onMapReady }) {
-  const mapRef = useRef(null)
-  const mapInstance = useRef(null)
-  const markerRef = useRef(null)
-  const searchBoundRef = useRef(false)
-  const [searchKeyword, setSearchKeyword] = useState('')
-  const [searchResults, setSearchResults] = useState([])
-  const [showDropdown, setShowDropdown] = useState(false)
-  const [isGettingLocation, setIsGettingLocation] = useState(false)
-  const src = `https://api.longdo.com/map/?key=${process.env.NEXT_PUBLIC_LONGDO_KEY}`
+export default function LongdoMapPicker({
+  onLocationSelect,
+  initialLocation,
+  readOnly = false,
+  zoom = 15,
+  height = 450,
+  onMapReady,
+}) {
+  const mapRef = useRef(null);
+  const mapInstance = useRef(null);
+  const markerRef = useRef(null);
+  const searchBoundRef = useRef(false);
+  const lastInitialApplied = useRef(null);
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [scriptReady, setScriptReady] = useState(false);
+  const src = `https://api.longdo.com/map/?key=${process.env.NEXT_PUBLIC_LONGDO_KEY}`;
 
-  // init map ONCE when SDK loads
-  const initMap = () => {
-    if (!window.longdo || !mapRef.current || mapInstance.current) return
-
-    const map = new window.longdo.Map({
-      placeholder: mapRef.current,
-      zoom: 15,
-    })
-    map.Ui.Crosshair.visible(false)
-    mapInstance.current = map
-
-    // notify parent that map is ready
-    try { onMapReady?.() } catch (e) { console.warn('onMapReady error', e) }
-
-    // bind click only when NOT readOnly
-    if (!readOnly) {
-      map.Event.bind('click', (evt) => {
-        const p = evt?.location || map.location(window.longdo.LocationMode.Pointer)
-        if (!p) return
-        const locStr = `${p.lat},${p.lon}`
-        console.log('map click ->', locStr)
-        try { onLocationSelect?.(locStr) } catch (e) { console.error(e) }
-
-        try {
-          if (markerRef.current) { map.Overlays.remove(markerRef.current); markerRef.current = null }
-        } catch (err) { console.warn('remove marker error', err) }
-        try {
-          const m = new window.longdo.Marker({ lat: p.lat, lon: p.lon })
-          map.Overlays.add(m)
-          markerRef.current = m
-        } catch (err) { console.error('add marker error', err) }
-      })
-
-      // bind search once
-      if (!searchBoundRef.current) {
-        map.Event.bind('search', (result) => {
-          if (result?.data?.length) { setSearchResults(result.data); setShowDropdown(true) }
-          else { setSearchResults([]); setShowDropdown(false) }
-        })
-        searchBoundRef.current = true
-      }
+  const parseLocation = (loc) => {
+    if (!loc) return null;
+    const parts = String(loc)
+      .split(",")
+      .map((s) => parseFloat(s.trim()));
+    if (parts.length === 2 && parts.every((n) => Number.isFinite(n))) {
+      return { lat: parts[0], lon: parts[1] };
     }
+    return null;
+  };
 
-    // ถ้ามี initialLocation ตั้งแต่เริ่มต้น ให้ปักหมุดเลย
-    if (initialLocation) {
-      const parts = String(initialLocation).split(',').map(s => parseFloat(s.trim()));
-      if (Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
-        const p = { lat: parts[0], lon: parts[1] };
-        try {
-          map.location(p, true);
-          const m = new window.longdo.Marker(p);
-          map.Overlays.add(m);
-          markerRef.current = m;
-          console.log('Initial marker set:', initialLocation);
-        } catch (err) {
-          console.error('Initial marker error', err);
-        }
-      }
-    }
-  }
-
-  // effect สำหรับ initialLocation ที่มาทีหลัง
-  useEffect(() => {
-    const map = mapInstance.current;
-    if (!map || !initialLocation) return;
-
-    const parts = String(initialLocation).split(',').map(s => parseFloat(s.trim()));
-    if (!Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) return;
-
-    const p = { lat: parts[0], lon: parts[1] };
-
-    try {
-      map.location(p, true);
-    } catch (err) {
-      console.warn('map.location failed', err);
-    }
-
+  const setMarker = (map, p) => {
+    if (!map || !p) return;
     try {
       if (markerRef.current) {
-        try { map.Overlays.remove(markerRef.current); } catch(e) { /* ignore */ }
+        try {
+          map.Overlays.remove(markerRef.current);
+        } catch (e) {}
         markerRef.current = null;
       }
       const m = new window.longdo.Marker(p);
       map.Overlays.add(m);
       markerRef.current = m;
-      console.log('marker set from initialLocation', initialLocation);
     } catch (err) {
-      console.error('set marker error', err);
+      console.error("setMarker error", err);
     }
+  };
+
+  const emitLocation = (p) => {
+    const locStr = `${p.lat},${p.lon}`;
+    try {
+      onLocationSelect?.(locStr);
+    } catch (e) {
+      console.error("onLocationSelect callback error", e);
+    }
+  };
+
+  const initMap = () => {
+    if (!window.longdo || !mapRef.current || mapInstance.current) return;
+    const map = new window.longdo.Map({ placeholder: mapRef.current, zoom });
+    map.Ui.Crosshair.visible(false);
+    mapInstance.current = map;
+
+    if (!readOnly) {
+      map.Event.bind("click", (evt) => {
+        const p =
+          evt?.location || map.location(window.longdo.LocationMode.Pointer);
+        if (!p) return;
+        setMarker(map, p);
+        emitLocation(p);
+      });
+    }
+
+    if (!searchBoundRef.current && !readOnly) {
+      map.Event.bind("search", (result) => {
+        if (result?.data?.length) {
+          setSearchResults(result.data);
+          setShowDropdown(true);
+        } else {
+          setSearchResults([]);
+          setShowDropdown(false);
+        }
+      });
+      searchBoundRef.current = true;
+    }
+
+    const initP = parseLocation(initialLocation);
+    if (initP) {
+      try {
+        map.location(initP, true);
+      } catch (e) {
+        console.warn("initial map.location failed", e);
+      }
+      setMarker(map, initP);
+      lastInitialApplied.current = `${initP.lat},${initP.lon}`;
+    } else if (!readOnly && navigator.geolocation && !initialLocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const p = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+          try {
+            map.location(p, true);
+            setMarker(map, p);
+          } catch (err) {
+            console.warn("auto geolocate location fail", err);
+          }
+        },
+        () => {},
+        { maximumAge: 60000 }
+      );
+    }
+
+    setTimeout(() => {
+      try {
+        map.resize();
+        if (onMapReady) {
+          onMapReady();
+        }
+      } catch (e) {}
+    }, 150);
+  };
+
+  useEffect(() => {
+    const map = mapInstance.current;
+    if (!map) return;
+    const p = parseLocation(initialLocation);
+    if (!p) return;
+    const key = `${p.lat},${p.lon}`;
+    if (lastInitialApplied.current === key) return;
+    try {
+      map.location(p, true);
+    } catch (e) {
+      console.warn("map.location (update) failed", e);
+    }
+    setMarker(map, p);
+    lastInitialApplied.current = key;
   }, [initialLocation]);
 
-  // ฟังก์ชันช่วย (ใช้เมื่อไม่ readOnly)
   const handleSearch = (keyword = searchKeyword) => {
-    const map = mapInstance.current
-    if (!map || !map.Search || readOnly) return
-    const term = String(keyword || '').trim()
+    if (readOnly) return;
+    const map = mapInstance.current;
+    if (!map || !map.Search) return;
+    const term = String(keyword || "").trim();
     if (!term || term.length < 2) {
-      setSearchResults([])
-      setShowDropdown(false)
-      return
+      setSearchResults([]);
+      setShowDropdown(false);
+      return;
     }
     try {
-      map.Search.search(term, { limit: 10 })
+      map.Search.search(term, { limit: 10 });
     } catch (err) {
-      console.error('search error', err)
+      console.error("search error", err);
     }
-  }
+  };
 
   const handleInputChange = (e) => {
-    const v = e.target.value
-    setSearchKeyword(v)
-    if (v.length > 1) {
-      handleSearch(v)
-    } else {
-      setSearchResults([])
-      setShowDropdown(false)
+    const v = e.target.value;
+    setSearchKeyword(v);
+    if (v.length > 1) handleSearch(v);
+    else {
+      setSearchResults([]);
+      setShowDropdown(false);
     }
-  }
+  };
 
   const selectPlace = (place) => {
-    const map = mapInstance.current
-    if (!map || !place || readOnly) return
-    const p = { lat: place.lat, lon: place.lon }
-    const locStr = `${p.lat},${p.lon}`
+    if (readOnly) return;
+    const map = mapInstance.current;
+    if (!map || !place) return;
+    const p = { lat: place.lat, lon: place.lon };
     try {
-      map.location(p, true)
-      try { if (markerRef.current) map.Overlays.remove(markerRef.current) } catch (e) { /* ignore */ }
-      const m = new window.longdo.Marker(p)
-      map.Overlays.add(m)
-      markerRef.current = m
+      map.location(p, true);
+      setMarker(map, p);
+      emitLocation(p);
     } catch (err) {
-      console.error('selectPlace error', err)
+      console.error("selectPlace error", err);
     }
-    setSearchKeyword(place.name || '')
-    setShowDropdown(false)
-    try { onLocationSelect?.(locStr) } catch (err) { console.error('onLocationSelect error', err) }
-  }
+    setSearchKeyword(place.name || "");
+    setShowDropdown(false);
+  };
 
   const getCurrentLocation = () => {
-    if (!navigator.geolocation || readOnly) { alert('เบราว์เซอร์ไม่รองรับการหาตำแหน่ง'); return }
-    setIsGettingLocation(true)
+    if (readOnly) return;
+    if (!navigator.geolocation) {
+      alert("เบราว์เซอร์ไม่รองรับการหาตำแหน่ง");
+      return;
+    }
+    setIsGettingLocation(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const lat = pos.coords.latitude, lon = pos.coords.longitude
-        const map = mapInstance.current
-        const locStr = `${lat},${lon}`
+        const p = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        const map = mapInstance.current;
         if (map) {
           try {
-            map.location({ lat, lon }, true)
-            try { if (markerRef.current) map.Overlays.remove(markerRef.current) } catch (e) {}
-            const m = new window.longdo.Marker({ lat, lon })
-            map.Overlays.add(m)
-            markerRef.current = m
-          } catch (err) { console.error('getCurrentLocation add marker error', err) }
+            map.location(p, true);
+            setMarker(map, p);
+            emitLocation(p);
+          } catch (err) {
+            console.error("getCurrentLocation marker error", err);
+          }
         }
-        try { onLocationSelect?.(locStr) } catch (err) { console.error('onLocationSelect error', err) }
-        setIsGettingLocation(false)
+        setIsGettingLocation(false);
       },
       (err) => {
-        console.error('geolocation error', err)
-        alert('ไม่สามารถหาตำแหน่งได้')
-        setIsGettingLocation(false)
+        console.error("geolocation error", err);
+        alert("ไม่สามารถหาตำแหน่งได้");
+        setIsGettingLocation(false);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
-    )
-  }
+    );
+  };
+
+  useEffect(() => {
+    if (scriptReady && window.longdo && !mapInstance.current) {
+      initMap();
+    }
+  }, [scriptReady]);
 
   return (
-    <div>
-      <Script src={src} strategy="afterInteractive" onLoad={initMap} />
+    <div className="map-wrapper" style={{ position: "relative" }}>
+      <Script
+        src={src}
+        strategy="afterInteractive"
+        onReady={() => {
+          setScriptReady(true);
+          if (window.longdo && !mapInstance.current) initMap();
+        }}
+        onLoad={() => {
+          setScriptReady(true);
+          if (window.longdo && !mapInstance.current) initMap();
+        }}
+      />
 
-      {/* แสดง UI เมื่อไม่ใช่ readOnly */}
       {!readOnly && (
-        <div style={{ marginBottom: 10, position: 'relative' }}>
-          <input
-            type="text"
-            value={searchKeyword}
-            placeholder="ค้นหาสถานที่..."
-            style={{ padding: '6px', width: '250px' }}
-            onChange={handleInputChange}
-            onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
-            onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
-          />
-          
+        <div className="map-search-bar">
+          <div className="map-search-group">
+            <input
+              type="text"
+              value={searchKeyword}
+              placeholder="ค้นหาสถานที่..."
+              className="map-search-input"
+              onChange={handleInputChange}
+              onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
+              onBlur={() => setTimeout(() => setShowDropdown(false), 180)}
+              aria-label="ค้นหาสถานที่"
+              disabled={readOnly}
+            />
+            {showDropdown && searchResults.length > 0 && (
+              <div className="search-dropdown" role="listbox">
+                {searchResults.map((place, i) => (
+                  <div
+                    key={i}
+                    className="dropdown-item"
+                    onClick={() => selectPlace(place)}
+                    role="option"
+                    tabIndex={0}
+                  >
+                    <div className="place-name">{place.name}</div>
+                    {place.address && (
+                      <div className="place-address">{place.address}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             onClick={getCurrentLocation}
-            disabled={isGettingLocation}
-            style={{ 
-              marginLeft: 8, 
-              padding: '6px 12px',
-              backgroundColor: '#4285f4',
-              color: 'white',
-              border: 'none',
-              borderRadius: 4,
-              cursor: isGettingLocation ? 'not-allowed' : 'pointer'
-            }}
+            disabled={isGettingLocation || readOnly}
+            className="map-current-btn"
+            aria-busy={isGettingLocation}
           >
-            {isGettingLocation ? '🔍 กำลังหา...' : '📍 ตำแหน่งของฉัน'}
+            {isGettingLocation ? "กำลังหา..." : "ใช้ตำแหน่งของฉัน"}
           </button>
-          
-          {showDropdown && searchResults.length > 0 && (
-            <div className="search-dropdown">
-              {searchResults.map((place, i) => (
-                <div key={i} className="dropdown-item" onClick={() => selectPlace(place)}>
-                  <div className="place-name">{place.name}</div>
-                  {place.address && <div className="place-address">{place.address}</div>}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
-      <div ref={mapRef} style={{ width: '100%', height: '400px' }} />
+      <div
+        ref={mapRef}
+        className="map-container"
+        aria-label="Longdo map"
+        style={{ width: "100%", height: `${height}px` }}
+      />
     </div>
-  )
+  );
 }

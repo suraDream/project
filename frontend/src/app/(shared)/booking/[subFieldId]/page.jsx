@@ -50,17 +50,15 @@ export default function Booking() {
   const [subFieldData, setSubFieldData] = useState([]);
   const [field_id, setFieldId] = useState(null);
   const [fieldName, setFieldName] = useState("");
-  const [showFacilities, setShowFacilities] = useState(false);
   const [timeLeft, setTimeLeft] = useState(600);
-  const [showModal, setShowModal] = useState(false);
-  const timerRef = useRef(null);
-  const isTimeoutRef = useRef(false);
+  const [showSummary, setShowSummary] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
   const [bookTimeArr, setBookTimeArr] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [startProcessLoad, SetstartProcessLoad] = useState(false);
   const [facilityAvailability, setFacilityAvailability] = useState({});
+  const summaryRef = useRef(null);
 
   usePreventLeave(startProcessLoad);
   const searchParams = useSearchParams();
@@ -149,11 +147,8 @@ export default function Booking() {
     socket.on("slot_booked", (data) => {
       console.log("slot_booked:", data);
       if (subFieldId && bookingDate) {
-        console.log("slot_booked: subFieldId:", subFieldId);
-        console.log("slot_booked: bookingDate:", bookingDate);
         fetchBookedSlots();
         fetchFacilityAvailability();
-
       }
     });
 
@@ -162,7 +157,7 @@ export default function Booking() {
     });
 
     return () => socket.disconnect();
-  }, [API_URL, subFieldId, bookingDate,facilityAvailability]);
+  }, [API_URL, subFieldId, bookingDate, facilityAvailability]);
 
   useEffect(() => {
     if (isBooked) {
@@ -170,15 +165,13 @@ export default function Booking() {
       setIsBooked(false);
     }
   }, [isBooked, fetchBookedSlots]);
-    console.log("field_id from sessionStorage:", field_id);
-    console.log("field_name from sessionStorage:", fieldName);
 
-useEffect(() => {
-  if (typeof window !== "undefined") {
-    setFieldId(sessionStorage.getItem("field_id"));
-    setFieldName(sessionStorage.getItem("field_name"));
-  }
-}, []);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setFieldId(sessionStorage.getItem("field_id"));
+      setFieldName(sessionStorage.getItem("field_name"));
+    }
+  }, []);
 
   useEffect(() => {
     if (!field_id) {
@@ -429,30 +422,47 @@ useEffect(() => {
     }
   };
 
-  const handleCheckBox = (facId, facPrice, facName) => {
+  const handleFacilitySelect = (facId, facPrice, facName) => {
     setSelectedFacilities((prev) => {
-      const updatedFacilities = { ...prev };
-     if (updatedFacilities[facId] === undefined) {
-  updatedFacilities[facId] = {
-    field_fac_id: facId,
-    fac_name: facName,
-    price: facPrice,
-    quantity: selectedFacilities[facId]?.quantity || 1, // ใช้ค่าเก่าถ้ามี
-  };
-} else {
-  delete updatedFacilities[facId];
-}
-      // คำนวณราคารวมใหม่
+      if (prev[facId] !== undefined) {
+        const updatedFacilities = { ...prev };
+        delete updatedFacilities[facId];
+
+        let newSumFac = 0;
+        Object.values(updatedFacilities).forEach((item) => {
+          newSumFac += item.price * item.quantity;
+        });
+        setSumFac(newSumFac);
+
+        const sum = newPrice * totalHours + newSumFac;
+        const remaining = sum - priceDeposit;
+        setTotalPrice(sum);
+        setTotalRemaining(remaining);
+
+        return updatedFacilities;
+      }
+
+      const updatedFacilities = {
+        ...prev,
+        [facId]: {
+          field_fac_id: facId,
+          fac_name: facName,
+          price: facPrice,
+          quantity: 1,
+        },
+      };
+
       let newSumFac = 0;
       Object.values(updatedFacilities).forEach((item) => {
         newSumFac += item.price * item.quantity;
       });
       setSumFac(newSumFac);
-      // อัปเดตราคารวม
+
       const sum = newPrice * totalHours + newSumFac;
       const remaining = sum - priceDeposit;
       setTotalPrice(sum);
       setTotalRemaining(remaining);
+
       return updatedFacilities;
     });
   };
@@ -510,7 +520,6 @@ useEffect(() => {
   function resetSelection() {
     setStartDate("");
     setEndDate("");
-    setShowFacilities(false);
     setCanBook(false);
     setSelectedSlots([]);
     setPayMethod("");
@@ -521,6 +530,7 @@ useEffect(() => {
     setTotalPrice(0);
     setTotalRemaining(0);
     setSumFac(0);
+    setShowSummary(false);
   }
 
   const handleConfirm = () => {
@@ -549,7 +559,7 @@ useEffect(() => {
   const today = new Date();
 
   const maxDate = new Date();
-  maxDate.setDate(maxDate.getDate() + 30);
+  maxDate.setDate(maxDate.getDate() + 60);
 
   const tileClassName = ({ date, view }) => {
     const day = date.getDay();
@@ -565,31 +575,25 @@ useEffect(() => {
   };
 
   const handleCancel = () => {
-    setShowModal(false);
-    isTimeoutRef.current = false;
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    setTimeLeft(0);
+    setShowSummary(false);
     setPayMethod("");
-    setShowFacilities(false);
     setSelectedFacilities([]);
     setSumFac(0);
+    resetSelection();
   };
 
   const fetchFacilityAvailability = async () => {
-     if (!field_id || !bookingDateFormatted || selectedSlotsArr.length === 0) return;
-  const slotsParam = encodeURIComponent(selectedSlotsArr.join(','));
-  const res = await fetch(
-    `${API_URL}/facilities/availability/${field_id}/${bookingDateFormatted}/${slotsParam}`,
-    { credentials: "include" }
-  );
-  
+    if (!field_id || !bookingDateFormatted || selectedSlotsArr.length === 0)
+      return;
+    const slotsParam = encodeURIComponent(selectedSlotsArr.join(","));
+    const res = await fetch(
+      `${API_URL}/facilities/availability/${field_id}/${bookingDateFormatted}/${slotsParam}`,
+      { credentials: "include" }
+    );
+
     const data = await res.json();
     console.log("Facility availability response:", data);
     if (res.ok) {
-      // data = [{ field_fac_id, available }]
       const map = {};
       data.forEach((item) => {
         map[item.field_fac_id] = item.available;
@@ -600,14 +604,13 @@ useEffect(() => {
   };
 
   useEffect(() => {
-      console.log("fetchFacilityAvailability", field_id, timeStart, timeEnd);
-    fetchFacilityAvailability();
-  }, [field_id, timeStart, timeEnd]);
+    if (field_id && bookingDateFormatted && selectedSlotsArr.length > 0) {
+      fetchFacilityAvailability();
+    }
+  }, [field_id, bookingDateFormatted, selectedSlotsArr]);
 
   const validateBeforeSubmit = () => {
     if (!timeStart || !timeEnd) {
-      // console.log("timeStart ",timeStart);
-      // console.log("timeEnd ",timeEnd);
       fetchFacilityAvailability();
       console.log("Facility availability fetched:", facilityAvailability);
       setMessage("กรุณาเลือกช่วงเวลา");
@@ -615,10 +618,13 @@ useEffect(() => {
       return;
     }
 
-    setShowModal(true);
-    setTimeLeft(600);
-    if (timerRef.current) clearInterval(timerRef.current);
-    // startCountdown();
+    setShowSummary(true);
+    setTimeout(() => {
+      summaryRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+      });
+    }, 120);
   };
 
   const handleSubmit = async () => {
@@ -669,15 +675,9 @@ useEffect(() => {
       if (response.ok) {
         setMessage("บันทึกการจองสำเร็จ");
         setMessageType("success");
-        setShowModal(false);
-        isTimeoutRef.current = false;
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
+        setShowSummary(false);
         setStartDate("");
         setEndDate("");
-        setTimeLeft(0);
         setIsBooked(true);
         setCanBook(false);
         setSelectedSlots([]);
@@ -688,12 +688,11 @@ useEffect(() => {
         setTotalHours(0);
         setTotalPrice(0);
         setTotalRemaining(0);
-        setShowFacilities(false);
         setSumFac(0);
       } else {
         setMessage(data.message);
         setMessageType("error");
-        setShowModal(false);
+        setShowSummary(false);
         setStartDate("");
         setEndDate("");
         setCanBook(false);
@@ -705,7 +704,6 @@ useEffect(() => {
         setTotalHours(0);
         setTotalPrice(0);
         setTotalRemaining(0);
-        setShowFacilities(false);
         setSumFac(0);
       }
     } catch (error) {
@@ -727,30 +725,11 @@ useEffect(() => {
     }
   }, [newPrice, totalHours, sumFac]);
 
-  const startCountdown = () => {
-    isTimeoutRef.current = true;
-    timerRef.current = setInterval(() => {
-      setTimeLeft((prev) => prev - 1);
-    }, 1000);
-  };
-
-  useEffect(() => {
-    if (timeLeft <= 0 && isTimeoutRef.current) {
-      clearInterval(timerRef.current);
-      setCanBook(false);
-      setBookingDate(null);
-      setShowModal(false);
-      resetSelection();
-      setMessage("หมดเวลาการจอง กรุณาเลือกช่วงเวลาและวันที่ใหม่อีกครั้ง");
-      setMessageType("error");
-    }
-  }, [timeLeft]);
-
-  useEffect(() => {
-    return () => clearInterval(timerRef.current);
-  }, []);
-
   function toggleSelectSlot(index) {
+    if (showSummary) {
+      setShowSummary(false);
+    }
+
     if (selectedSlots.length === 0) {
       const newIndexes = [index];
       const newSlotArr = [slots[index]];
@@ -815,6 +794,7 @@ useEffect(() => {
           <p>{message}</p>
         </div>
       )}
+
       <div className="container-bookings">
         {slots.length === 0 ? (
           <div>
@@ -855,8 +835,7 @@ useEffect(() => {
               </div>
             )}
 
-            <h1 className="select-time-book">เลือกวันที่และช่วงเวลา</h1>
-            <hr className="divider-order-select-date" />
+            {/* <hr className="divider-order-select-date" /> */}
             <div className="calendar-btn-select-date">
               <div className="date-picker-container">
                 <div className="date-select-label">
@@ -881,13 +860,19 @@ useEffect(() => {
                 {bookingDate && (
                   <button
                     className="btn-cancel-select-date"
-                    onClick={() => setBookingDate(null)}
+                    onClick={() => {
+                      setBookingDate(null);
+                      setShowSummary(false);
+                      resetSelection();
+                    }}
                   >
                     X
                   </button>
                 )}
               </div>
             </div>
+            <hr className="divider-order-select-date" />
+
             <div className="sum-status-box-book">
               <div className="status-item-book">
                 <div className="status-box-book-1"></div>
@@ -1002,6 +987,7 @@ useEffect(() => {
             </div>
           </div>
         )}
+
         <div className="book-sider">
           <div className="book-sum-box">
             <h1 className="field-title-book">{fieldName}</h1>
@@ -1049,174 +1035,264 @@ useEffect(() => {
             )}
           </div>
         </div>
-        {showModal && (
-          <div className="modal-overlay-confirmbooking">
-            <div className="modal-box-confirmbooking">
-              <h1 className="confirm-header-book">ยืนยันการจอง?</h1>
-              <div className="countdown-timer-book">
-                {Math.floor(timeLeft / 60)
-                  .toString()
-                  .padStart(2, "0")}
-                :{(timeLeft % 60).toString().padStart(2, "0")}
-              </div>
-              <div className="detail-total-hour">
-                <h1 className="field-title-book">{fieldName}</h1>
-                {subFieldData !== "ไม่พบข้อมูล" ? (
-                  <h2 className="sub-field-title-modal">
-                    สนาม: {subFieldData.sub_field_name}
-                  </h2>
-                ) : (
-                  <h2 className="sub-field-title-modal sub-field-error">
-                    สนาม: {subFieldData}
-                  </h2>
-                )}
-                <div className="time-info-book">
-                  <strong>เวลาเริ่ม: {timeStart || "-"}</strong>
-                  <strong>เวลาสิ้นสุด: {timeEnd || "-"}</strong>
-                  <strong>
-                    รวมเวลา: {totalHours ? formatTotalHours(totalHours) : "-"}
-                  </strong>
-                  <strong className="total-per-hour">
-                    ราคา: {formatPrice(totalPrice)} บาท
-                  </strong>
+      </div>
+
+      {/* Summary Section - replaces modal */}
+      {showSummary && (
+        <div ref={summaryRef} className="booking-summary-section">
+          <div className="booking-summary-container">
+            <h1 className="summary-header">สรุปการจอง</h1>
+            <hr className="divider-order-select-date" />
+
+            <div className="summary-details">
+              <h2 className="field-title-summary">{fieldName}</h2>
+              {subFieldData !== "ไม่พบข้อมูล" ? (
+                <h3 className="sub-field-title-summary">
+                  สนาม: {subFieldData.sub_field_name}
+                </h3>
+              ) : (
+                <h3 className="sub-field-title-summary sub-field-error">
+                  สนาม: {subFieldData}
+                </h3>
+              )}
+
+              <div className="time-summary-info">
+                <div className="summary-row">
+                  <strong>วันที่:</strong>
+                  <span>{formatDateToThai(bookingDate)}</span>
+                </div>
+                <div className="summary-row">
+                  <strong>เวลาเริ่ม:</strong>
+                  <span>{timeStart}</span>
+                </div>
+                <div className="summary-row">
+                  <strong>เวลาสิ้นสุด:</strong>
+                  <span>{timeEnd}</span>
+                </div>
+                <div className="summary-row">
+                  <strong>รวมเวลา:</strong>
+                  <span>{formatTotalHours(totalHours)}</span>
+                </div>
+                <div className="summary-row">
+                  <strong>ประเภทการจอง:</strong>
+                  <span>{activity}</span>
                 </div>
               </div>
-              {facilities.length > 0 && (
-                <div className="facility-wrapper">
-                  <button
-                    style={{
-                      cursor: startProcessLoad ? "not-allowed" : "pointer",
-                    }}
-                    disabled={startProcessLoad}
-                    onClick={() => setShowFacilities(!showFacilities)}
-                    className="toggle-facilities"
-                  >
-                    {showFacilities
-                      ? "ซ่อนสิ่งอำนวยความสะดวก"
-                      : "สิ่งอำนวยความสะดวกเพิ่มเติม"}
-                  </button>
 
-                  {showFacilities && (
-                    <div className="facilities-list-book">
-                      {facilities.map((fac) => (
+              {/* Facilities Section with Images */}
+              {facilities.length > 0 && (
+                <div className="facilities-summary-section">
+                  <h4>สิ่งอำนวยความสะดวก</h4>
+
+                  <div className="facilities-carousel-container">
+                    <div className="facilities-carousel">
+                      {facilities.map((fac) => {
+                        const isSelected =
+                          selectedFacilities[fac.field_fac_id] !== undefined;
+                        const availableQty =
+                          facilityAvailability[fac.field_fac_id] ||
+                          fac.quantity_total;
+                        const selectedQty =
+                          selectedFacilities[fac.field_fac_id]?.quantity || 0;
+
+                        return (
+                          <div
+                            key={fac.field_fac_id}
+                            className={`facility-card-summary ${
+                              isSelected ? "selected" : ""
+                            }`}
+                          >
+                            <div className="facility-image-container">
+                              {fac.image_path ? (
+                                <img
+                                  src={fac.image_path}
+                                  alt={fac.fac_name}
+                                  className="facility-image"
+                                  onError={(e) => {
+                                    e.target.style.display = "none";
+                                    e.target.nextSibling.style.display = "flex";
+                                  }}
+                                />
+                              ) : null}
+                              <div
+                                className="facility-no-image"
+                                style={{
+                                  display: fac.image_path ? "none" : "flex",
+                                }}
+                              >
+                                <span>ไม่มีรูปภาพ</span>
+                              </div>
+                            </div>
+
+                            <div className="facility-info-summary">
+                              <h5 className="facility-name">{fac.fac_name}</h5>
+                              <p className="facility-price">
+                                ราคา: {formatPrice(fac.fac_price)} บาท
+                              </p>
+                              <p className="facility-availability">
+                                เหลือ {availableQty} จาก {fac.quantity_total}{" "}
+                              </p>
+
+                              <div className="facility-controls">
+                                <button
+                                  type="button"
+                                  className={`facility-select-btn ${
+                                    isSelected ? "selected" : ""
+                                  }`}
+                                  onClick={() =>
+                                    handleFacilitySelect(
+                                      fac.field_fac_id,
+                                      fac.fac_price,
+                                      fac.fac_name
+                                    )
+                                  }
+                                >
+                                  {isSelected ? "ยกเลิกเลือก" : "เลือก"}
+                                </button>
+
+                                {isSelected && (
+                                  <div className="quantity-control">
+                                    <label>จำนวน:</label>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={availableQty}
+                                      value={selectedQty}
+                                      onChange={(e) => {
+                                        const value = Math.max(
+                                          1,
+                                          Math.min(
+                                            availableQty,
+                                            Number(e.target.value)
+                                          )
+                                        );
+                                        setSelectedFacilities((prev) => {
+                                          const updated = {
+                                            ...prev,
+                                            [fac.field_fac_id]: {
+                                              ...prev[fac.field_fac_id],
+                                              quantity: value,
+                                            },
+                                          };
+
+                                          let newSumFac = 0;
+                                          Object.values(updated).forEach(
+                                            (item) => {
+                                              newSumFac +=
+                                                item.price * item.quantity;
+                                            }
+                                          );
+                                          setSumFac(newSumFac);
+
+                                          const sum =
+                                            newPrice * totalHours + newSumFac;
+                                          const remaining = sum - priceDeposit;
+                                          setTotalPrice(sum);
+                                          setTotalRemaining(remaining);
+
+                                          return updated;
+                                        });
+                                      }}
+                                      className="quantity-input"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Selected Facilities Summary */}
+                  {Object.keys(selectedFacilities).length > 0 && (
+                    <div className="selected-facilities-summary">
+                      <h5>สิ่งอำนวยความสะดวกที่เลือก:</h5>
+                      {Object.values(selectedFacilities).map((fac) => (
                         <div
                           key={fac.field_fac_id}
-                          className="facility-item-book"
+                          className="selected-facility-item"
                         >
-                          <input
-                            type="checkbox"
-                            checked={
-                              selectedFacilities[fac.field_fac_id] !== undefined
-                            }
-                            onChange={() =>
-                              handleCheckBox(
-                                fac.field_fac_id,
-                                fac.fac_price,
-                                fac.fac_name
-                              )
-                            }
-                          />
-                          <label>
-                            {fac.fac_name} - {formatPrice(fac.fac_price)} บาท
-                           {facilityAvailability[fac.field_fac_id] !== undefined &&
-  ` (เหลือ ${facilityAvailability[fac.field_fac_id]})`}
-                          </label>{" "}
-                          {selectedFacilities[fac.field_fac_id] !==
-                            undefined && (
-                            <input
-                              type="number"
-                              min={1}
-                              style={{ marginLeft: "8px", width: "60px" }}
-                              placeholder="จำนวน"
-                              value={
-                                selectedFacilities[fac.field_fac_id]
-                                  ?.quantity || 1
-                              }
-                              onChange={(e) => {
-                                const value = Math.max(
-                                  1,
-                                  Number(e.target.value)
-                                );
-                                setSelectedFacilities((prev) => {
-                                  const updated = {
-                                    ...prev,
-                                    [fac.field_fac_id]: {
-                                      ...prev[fac.field_fac_id],
-                                      quantity: value, // อัปเดตจำนวนที่เลือก
-                                    },
-                                  };
-                                  console.log(
-                                    "selectedFacilities updated:",
-                                    updated
-                                  );
-                                  // คำนวณราคารวมใหม่
-                                  let newSumFac = 0;
-                                  Object.values(updated).forEach((item) => {
-                                    newSumFac += item.price * item.quantity;
-                                  });
-                                  setSumFac(newSumFac);
-                                  // อัปเดตราคารวม
-                                  const sum = newPrice * totalHours + newSumFac;
-                                  const remaining = sum - priceDeposit;
-                                  setTotalPrice(sum);
-                                  setTotalRemaining(remaining);
-                                  return updated;
-                                });
-                              }}
-                            />
-                          )}
+                          <span>{fac.fac_name}</span>
+                          <span>จำนวน: {fac.quantity}</span>
+                          <span>
+                            {formatPrice(fac.price * fac.quantity)} บาท
+                          </span>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
               )}
-              <div className={`total-box ${canBook ? "show" : ""}`}>
-                <div className="summary">
-                  <strong className="price-deposit">
-                    มัดจำที่ต้องจ่าย: {formatPrice(priceDeposit)} บาท
-                  </strong>
 
-                  <strong className="total-per-hour">
-                    ราคาหลังหักค่ามัดจำ: {formatPrice(totalRemaining)} บาท
-                  </strong>
-                  <strong className="total-remaining">
-                    ยอดรวมสุทธิ: {formatPrice(totalPrice)} บาท
-                  </strong>
+              <div className="price-summary-section">
+                <div className="price-breakdown">
+                  <div className="price-row">
+                    <span>ราคาสนาม ({formatTotalHours(totalHours)}):</span>
+                    <span>{formatPrice(newPrice * totalHours)} บาท</span>
+                  </div>
+
+                  {sumFac > 0 && (
+                    <div className="price-row">
+                      <span>สิ่งอำนวยความสะดวก:</span>
+                      <span>{formatPrice(sumFac)} บาท</span>
+                    </div>
+                  )}
+
+                  <div className="price-row deposit-row">
+                    <span>มัดจำที่ต้องจ่าย:</span>
+                    <span>{formatPrice(priceDeposit)} บาท</span>
+                  </div>
+
+                  <div className="price-row remaining-row">
+                    <span>
+                      <strong>คงเหลือที่ต้องจ่าย:</strong>
+                    </span>
+                    <span>
+                      <strong>{formatPrice(totalRemaining)} บาท</strong>
+                    </span>
+                  </div>
+                  <div className="price-row total-row">
+                    <span>
+                      <strong>รวมทั้งหมด:</strong>
+                    </span>
+                    <span>
+                      <strong>{formatPrice(totalPrice)} บาท</strong>
+                    </span>
+                  </div>
                 </div>
                 {totalPrice > 0 && (
-                  <div className="payment-method">
-                    <div className="radio-group-book">
-                      <label>
+                  <div className="payment-method-section">
+                    <h5>วิธีการชำระเงิน:</h5>
+                    <div className="payment-options">
+                      <label className="payment-option">
                         <input
                           type="radio"
                           value="โอนจ่าย"
                           checked={payMethod === "โอนจ่าย"}
                           onChange={handleRadioChange}
                         />
-                        โอนจ่าย
+                        <span>โอนผ่านธนาคาร</span>
                       </label>
-                      <label>
+                      <label className="payment-option">
                         <input
                           type="radio"
                           value="เงินสด"
                           checked={payMethod === "เงินสด"}
                           onChange={handleRadioChange}
                         />
-                        เงินสด
+                        <span>เงินสดหน้าสนาม</span>
                       </label>
                     </div>
                   </div>
                 )}
               </div>
-              <div className="modal-buttons-confirmbooking">
+              <div className="summary-actions">
                 <button
-                  style={{
-                    cursor: startProcessLoad ? "not-allowed" : "pointer",
-                  }}
-                  disabled={startProcessLoad}
                   onClick={handleConfirm}
-                  className="btn-confirm-confirmbooking"
+                  disabled={startProcessLoad}
+                  className="btn-confirm-booking"
                 >
                   {startProcessLoad ? (
                     <span className="dot-loading">
@@ -1228,26 +1304,19 @@ useEffect(() => {
                     "ยืนยันการจอง"
                   )}
                 </button>
+
                 <button
-                  style={{
-                    cursor: startProcessLoad ? "not-allowed" : "pointer",
-                  }}
-                  disabled={startProcessLoad}
                   onClick={handleCancel}
-                  className="btn-cancel-confirmbooking"
+                  disabled={startProcessLoad}
+                  className="btn-cancel-booking"
                 >
                   ยกเลิก
-                </button>
-                <button
-                  onClick={ fetchFacilityAvailability}
-                >
-                  ดูรายละเอียด
                 </button>
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

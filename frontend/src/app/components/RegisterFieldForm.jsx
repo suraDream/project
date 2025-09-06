@@ -275,6 +275,7 @@ export default function RegisterFieldForm() {
         copy[facId] = {
           price: "",
           quantity: "",
+          description: "",
           imageFile: null,
           preview: null,
         };
@@ -336,6 +337,15 @@ export default function RegisterFieldForm() {
     setSelectedFacilities((prev) => ({
       ...prev,
       [facId]: { ...(prev[facId] || { price: "" }), quantity: value },
+    }));
+  };
+  const handleFacilityDescription = (facId, value) => {
+    setSelectedFacilities((prev) => ({
+      ...prev,
+      [facId]: {
+        ...(prev[facId] || { price: "", quantity: "" }),
+        description: value,
+      },
     }));
   };
 
@@ -594,11 +604,12 @@ export default function RegisterFieldForm() {
 
     const facilitiesPayload = {};
     selectedFacs.forEach((id, idx) => {
-      const { price, quantity } = selectedFacilities[id];
+      const { price, quantity, description } = selectedFacilities[id];
       const safeKey = makeSafeKey(id, "fac" + idx);
       facilitiesPayload[id] = {
         price: String(price),
         quantity_total: String(quantity),
+        description: String(description),
         _key: safeKey,
       };
     });
@@ -751,23 +762,6 @@ export default function RegisterFieldForm() {
           <div className="map-gps-container-register-field">
             <div className="input-group-register-field">
               <label>พิกัด GPS:</label>{" "}
-              {/* <div className="exapmle-gps">
-              <a
-                href="https://support.google.com/maps/answer/18539?hl=th&co=GENIE.Platform%3DiOS&oco=0/"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                วิธีเอาละติจูดและลองจิจูดใน Google Maps
-              </a>
-              <br />
-              <a
-                href="https://maps.google.com/"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Google Maps
-              </a>
-            </div> */}
               <input
                 type="text"
                 maxLength={100}
@@ -789,10 +783,11 @@ export default function RegisterFieldForm() {
                 <div
                   style={{
                     color: "#034078",
-                    display: "inline-flex",
+                    display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    marginTop: 8,
+                    width: "50%",
+                    margin: " 20px auto",
                     padding: 8,
                     backgroundColor: "#beddf9ff",
                     borderRadius: 4,
@@ -1184,6 +1179,18 @@ export default function RegisterFieldForm() {
               เลือกเอกสาร
             </label>
           </div>
+          {fieldData.documents && fieldData.documents.length > 0 && (
+            <div className="selected-documents">
+              <p className="selected-documents-title">
+                ไฟล์ที่เลือก ({fieldData.documents.length}):
+              </p>
+              <ul className="selected-documents-list">
+                {Array.from(fieldData.documents).map((file, idx) => (
+                  <li key={idx}>{file.name}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="input-group-register-field">
             <div className="acc-type">
               <label htmlFor="account-type">เลือกประเภทบัญชี</label>
@@ -1384,24 +1391,26 @@ export default function RegisterFieldForm() {
                           placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)"
                           value={selectedFacilities[key]?.description ?? ""}
                           onChange={(e) => {
-                            handleFacilityQuantityChange(key, v);
+                            handleFacilityDescription(key, e.target.value);
                           }}
                         ></textarea>
-                        <label className="file-label-register-field">
-                          เลืกรูป (ถ้ามี)
-                          <input
-                            style={{ display: "none" }}
-                            type="file"
-                            className="facility-file-input"
-                            accept="image/*"
-                            onChange={(e) =>
-                              handleFacilityImageChange(
-                                key,
-                                e.target.files?.[0]
-                              )
-                            }
-                          />
-                        </label>
+                        <div className="faccility-image-section">
+                          <label className="file-label-register-field">
+                            เลืกรูป (ถ้ามี)
+                            <input
+                              style={{ display: "none" }}
+                              type="file"
+                              className="facility-file-input"
+                              accept="image/*"
+                              onChange={(e) =>
+                                handleFacilityImageChange(
+                                  key,
+                                  e.target.files?.[0]
+                                )
+                              }
+                            />
+                          </label>
+                        </div>
                       </div>
                       {selectedFacilities[key]?.preview && (
                         <div className="facility-image-preview">

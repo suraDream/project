@@ -32,52 +32,45 @@ export default function Mybooking() {
     }
   }, [user, isLoading, router]);
 
-  // ✅ แก้ fetchData function - ลบ async ออก
-  const fetchData = useCallback(() => {
+  const fetchData = useCallback(async () => {
     if (!user?.user_id) return;
 
-    // ✅ สร้าง async function ข้างใน
-    const loadData = async () => {
-      try {
-        const queryParams = new URLSearchParams();
-        if (filters.date) queryParams.append("date", filters.date);
-        if (filters.status) queryParams.append("status", filters.status);
+    try {
+      const queryParams = new URLSearchParams();
+      if (filters.date) queryParams.append("date", filters.date);
+      if (filters.status) queryParams.append("status", filters.status);
 
-        const res = await fetch(
-          `${API_URL}/booking/my-bookings/${
-            user.user_id
-          }?${queryParams.toString()}`,
-          {
-            credentials: "include",
-          }
-        );
-
-        const data = await res.json();
-
-        if (res.ok) {
-          setMybooking(data.data);
-          setUserFirstUserName(data.user?.first_name || "");
-          setUserLastUserName(data.user?.last_name || "");
-          setUserInfo(
-            `${data.user?.first_name || ""} ${data.user?.last_name || ""}`
-          );
-          console.log("Booking Data:", data.data);
-        } else {
-          console.log("Booking fetch error:", data.error);
-          setMessage(data.error);
-          setMessageType("error");
+      const res = await fetch(
+        `${API_URL}/booking/my-bookings/${
+          user.user_id
+        }?${queryParams.toString()}`,
+        {
+          credentials: "include",
         }
-      } catch (error) {
-        console.error("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้", error);
-        setMessage("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
-        setMessageType("error");
-      } finally {
-        setDataLoading(false);
-      }
-    };
+      );
 
-    // ✅ เรียก async function
-    loadData();
+      const data = await res.json();
+
+      if (res.ok) {
+        setMybooking(data.data);
+        setUserFirstUserName(data.user?.first_name || "");
+        setUserLastUserName(data.user?.last_name || "");
+        setUserInfo(
+          `${data.user?.first_name || ""} ${data.user?.last_name || ""}`
+        );
+        console.log("Booking Data:", data.data);
+      } else {
+        console.log("Booking fetch error:", data.error);
+        setMessage(data.error);
+        setMessageType("error");
+      }
+    } catch (error) {
+      console.error("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้", error);
+      setMessage("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
+      setMessageType("error");
+    } finally {
+      setDataLoading(false);
+    }
   }, [user?.user_id, filters, API_URL]);
 
   useEffect(() => {
@@ -220,6 +213,16 @@ export default function Mybooking() {
       return () => clearTimeout(timer);
     }
   }, [message]);
+  
+  useEffect(() => {
+    if (dataLoading) return;
+    requestAnimationFrame(() => {
+      const cards = document.querySelectorAll('.booking-list .booking-card');
+      let max = 0;
+      cards.forEach(c => { max = Math.max(max, c.offsetHeight); });
+      cards.forEach(c => { c.style.minHeight = max + 'px'; });
+    });
+  }, [currentBookings, dataLoading]);
 
   return (
     <>
@@ -260,11 +263,20 @@ export default function Mybooking() {
           </label>
         </div>
         {dataLoading ? (
-          <div className="load-container-order">
-            <div className="loading-data">
-              <div className="loading-data-spinner"></div>
-            </div>
-          </div>
+          <ul className="booking-list skeleton-list" aria-hidden="true">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <li key={i} className="booking-card skeleton-card">
+                <div className="skel-line w60" />
+                <div className="skel-line w40" />
+                <div className="skel-box" />
+                <div className="skel-line w80" />
+                <div className="skel-line w50" />
+                <div className="skel-line w70" />
+                <div className="skel-line w30" />
+                <div className="skel-btn w40" />
+              </li>
+            ))}
+          </ul>
         ) : currentBookings.length > 0 ? (
           <>
             <ul className="booking-list">
@@ -359,13 +371,13 @@ export default function Mybooking() {
                           ยอดคงเหลือ:
                         </span>
                         <span className="total-remaining-order">
-                          +{item.total_remaining} บาท
+                          {item.total_remaining} บาท
                         </span>
                       </div>
 
                       <div className="line-item-order plus">
                         <span className="total_deposit-order">มัดจำ:</span>
-                        <span>+{item.price_deposit} บาท</span>
+                        <span>{item.price_deposit} บาท</span>
                       </div>
                       <hr className="divider-order" />
                       <div className="line-item-order total">

@@ -301,25 +301,27 @@ export default function Myorder() {
                 <option value="complete">การจองสำเร็จ</option>
               </select>
             </label>
-            <button onClick={clearFilters} className="clear-filters-btn">
-              ล้างตัวกรอง
-            </button>
-            <button
-              className="swip-mode-order"
-              type="button"
-              onClick={() => {
-                setUseDateRange((prev) => !prev);
-                setFilters((prev) => ({
-                  ...prev,
-                  bookingDate: useDateRange ? prev.bookingDate : "",
-                  startDate: useDateRange ? "" : prev.startDate,
-                  endDate: useDateRange ? "" : prev.endDate,
-                  status: useDateRange ? "" : prev.status,
-                }));
-              }}
-            >
-              {useDateRange ? "ใช้วันที่อย่างเดียว" : "ใช้ช่วงวัน"}
-            </button>
+            <div className="btn-group-filter">
+              <button onClick={clearFilters} className="clear-filters-btn">
+                ล้างตัวกรอง
+              </button>
+              <button
+                className="swip-mode-order"
+                type="button"
+                onClick={() => {
+                  setUseDateRange((prev) => !prev);
+                  setFilters((prev) => ({
+                    ...prev,
+                    bookingDate: useDateRange ? prev.bookingDate : "",
+                    startDate: useDateRange ? "" : prev.startDate,
+                    endDate: useDateRange ? "" : prev.endDate,
+                    status: useDateRange ? "" : prev.status,
+                  }));
+                }}
+              >
+                {useDateRange ? "ใช้วันที่อย่างเดียว" : "ใช้ช่วงวัน"}
+              </button>
+            </div>
             {stats.totalRevenue >= 0 && (
               <div className="revenue-summary">
                 <div className="revenue-card">
@@ -379,26 +381,27 @@ export default function Myorder() {
               </select>
             </label>
 
-            <button onClick={clearFilters} className="clear-filters-btn">
-              ล้างตัวกรอง
-            </button>
-            <button
-              className="swip-mode-order"
-              type="button"
-              onClick={() => {
-                setUseDateRange((prev) => !prev);
-                setFilters((prev) => ({
-                  ...prev,
-                  bookingDate: useDateRange ? prev.bookingDate : "",
-                  startDate: useDateRange ? "" : prev.startDate,
-                  endDate: useDateRange ? "" : prev.endDate,
-                  status: useDateRange ? "" : prev.status,
-                }));
-              }}
-              style={{ marginBottom: "10px" }}
-            >
-              {useDateRange ? "ใช้วันที่อย่างเดียว" : "ใช้ช่วงวัน"}
-            </button>
+            <div className="btn-group-filter">
+              <button onClick={clearFilters} className="clear-filters-btn">
+                ล้างตัวกรอง
+              </button>
+              <button
+                className="swip-mode-order"
+                type="button"
+                onClick={() => {
+                  setUseDateRange((prev) => !prev);
+                  setFilters((prev) => ({
+                    ...prev,
+                    bookingDate: useDateRange ? prev.bookingDate : "",
+                    startDate: useDateRange ? "" : prev.startDate,
+                    endDate: useDateRange ? "" : prev.endDate,
+                    status: useDateRange ? "" : prev.status,
+                  }));
+                }}
+              >
+                {useDateRange ? "ใช้วันที่อย่างเดียว" : "ใช้ช่วงวัน"}
+              </button>
+            </div>
             {stats.totalRevenue >= 0 && (
               <div className="revenue-summary">
                 <div className="revenue-card">
@@ -449,11 +452,20 @@ export default function Myorder() {
           </div>
         )}
         {dataLoading ? (
-          <div className="load-container-order">
-            <div className="loading-data">
-              <div className="loading-data-spinner"></div>
-            </div>
-          </div>
+          <ul className="booking-list skeleton-list" aria-hidden="true">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <li key={i} className="booking-card skeleton-card">
+                <div className="skel-line w60" />
+                <div className="skel-line w40" />
+                <div className="skel-box" />
+                <div className="skel-line w80" />
+                <div className="skel-line w50" />
+                <div className="skel-line w70" />
+                <div className="skel-line w30" />
+                <div className="skel-btn w40" />
+              </li>
+            ))}
+          </ul>
         ) : currentBookings.length > 0 ? (
           <>
             <ul className="booking-list">
@@ -541,13 +553,13 @@ export default function Myorder() {
                           ยอดคงเหลือ:
                         </span>
                         <span className="total-remaining-order">
-                          +{item.total_remaining} บาท
+                          {item.total_remaining} บาท
                         </span>
                       </div>
 
                       <div className="line-item-order plus">
                         <span className="total_deposit-order">มัดจำ:</span>
-                        <span>+{item.price_deposit} บาท</span>
+                        <span>{item.price_deposit} บาท</span>
                       </div>
 
                       <hr className="divider-order" />
