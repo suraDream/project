@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState,useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import NotFoundCard from "@/app/components/NotFoundCard";
 import "@/app/css/field-profile.css";
@@ -11,6 +11,7 @@ import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { usePreventLeave } from "@/app/hooks/usePreventLeave";
 import LongdoMapPicker from "@/app/components/LongdoMapPicker";
+import {io} from "socket.io-client";
 
 dayjs.extend(relativeTime);
 dayjs.locale("th");
@@ -48,6 +49,31 @@ export default function CheckFieldDetail() {
   usePreventLeave(startProcessLoad);
   const [notFoundFlag, setNotFoundFlag] = useState(false);
   const [showSubfieldModal, setShowSubfieldModal] = useState(false);
+  const [userFollowing, setUserFollowing] = useState(false);
+  const [followers, setFollowers] = useState([]);
+  const [dataFollowers, setDataFollowers] = useState([]);
+  const socketRef = useRef(null);
+
+
+  useEffect(() => {
+    const socket = io(API_URL,
+      { transports: ['websocket'],
+        withCredentials: true
+       }
+    );
+    console.log("Socket initialized:", socket);
+    socketRef.current = socket;
+       socket.on("connect", () => {
+      console.log("Socket connected:", socket.id);
+    });
+    socket.on('following', (data) => {
+      if (data.fieldId === Number(fieldId) && data.userId === Number(user?.user_id)) {
+        fetchFollowing();
+      }
+    });
+    return () => { socket.disconnect(); };
+
+  }, [API_URL, fieldId, user]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -204,6 +230,60 @@ export default function CheckFieldDetail() {
 
     fetchPosts();
   }, [fieldId, router]);
+
+   const fetchFollowing = async () => {
+      
+        const res = await fetch(`${API_URL}/following/get-following/${user?.user_id}`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+
+        const data = await res.json();
+        console.log("following", data);
+        if (res.ok) {
+          if(data.following === 1){
+            setUserFollowing(true);
+            console.log("set true");
+            
+          } else {
+            setUserFollowing(false);
+            console.log("set false");
+           
+          }
+        }
+ 
+    };
+
+    const fetchFollowerAll = async () => {
+      try {
+        const res = await fetch(`${API_URL}/following/all-followers/${fieldId}`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+
+        const data = await res.json();
+        console.log("followers", data);
+        if (res.ok) {
+          setFollowers(data.countFollowers || 0);
+          setDataFollowers(data.data || []);
+          console.log("set followers", data.countFollowers);
+          console.log("set data followers", data.data);
+        }
+      } catch (error) {
+        console.error("Error fetching followers:", error);
+      }
+    };
+
+  useEffect(() => {
+   
+
+    fetchFollowing();
+    fetchFollowerAll();
+  }, [user, router, userFollowing]);
 
   useEffect(() => {
     window.scrollTo({ top: 900, behavior: "smooth" });
@@ -466,14 +546,7 @@ export default function CheckFieldDetail() {
     return "#";
   };
 
-  // เพิ่มฟังก์ชันสำหรับ Longdo Map
-  const getLongdoMapLink = (gpsLocation) => {
-    const coords = extractLatLngFromUrl(gpsLocation);
-    if (!coords) return null;
 
-    const [lat, lon] = coords.split(",");
-    return `https://map.longdo.com/search/${lat},${lon}`;
-  };
 
   const formatPrice = (value) => new Intl.NumberFormat("th-TH").format(value);
 
@@ -528,6 +601,64 @@ export default function CheckFieldDetail() {
     setHighlightMissing(false);
   };
 
+  const handleFollow = async () => {
+    try {
+      console.log("fieldId, userId", fieldId, user?.user_id);
+      console.log('following', userFollowing);
+      const res = await fetch(`${API_URL}/following/add-following`, {
+        method: "POST",
+      
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ fieldId: fieldId, userId: user?.user_id }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setMessage(data.message);
+        setMessageType("success");
+       
+      } else {
+        setMessage(data.message || "เกิดข้อผิดพลาดในการติดตาม");
+        setMessageType("error");
+      }
+    } catch (error) {
+      console.error("Follow error:", error);
+      setMessage("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
+      setMessageType("error");
+    }
+  };
+
+    const cancelFollow = async () => {
+    try {
+      const res = await fetch(`${API_URL}/following/cancel-following`, {
+        method: "DELETE",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ fieldId, userId : user?.user_id }),
+      });
+
+      const data = await res.json().catch(() => ({}));;
+      if (res.ok) {
+        setMessage(data.message);
+        setMessageType("success");
+       
+      } else {
+        setMessage(data.message || "เกิดข้อผิดพลาดในการติดตาม");
+        setMessageType("error");
+      }
+    } catch (error) {
+      console.error("Follow error:", error);
+      setMessage("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
+      setMessageType("error");
+    }
+  };
+
+  
+
   return (
     <>
       {message && (
@@ -554,7 +685,15 @@ export default function CheckFieldDetail() {
           />
           <div className="head-title-profile">
             <strong> {fieldData?.field_name}</strong>
+            
           </div>
+          {userFollowing ? (
+            <button onClick={cancelFollow}>เลิกติดตาม</button>
+            
+           
+          ) : (
+            <button onClick={handleFollow}>ติดตาม</button>
+          )}
         </div>
       ) : (
         <div>
@@ -569,6 +708,7 @@ export default function CheckFieldDetail() {
       )}
       <div className="field-detail-container-profile">
         <div className="undercontainer-proflie">
+          <p><strong>ผู้ติดตาม:</strong> {followers} คน</p>
           <h1 className="sub-fields-profile">รายละเอียดสนามย่อย</h1>
           <div className="sub-fields-container-profile">
             {fieldData?.sub_fields && fieldData.sub_fields.length > 0 ? (
