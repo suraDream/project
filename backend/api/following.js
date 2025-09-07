@@ -7,16 +7,16 @@ const authMiddleware = require('../middlewares/auth');
 router.post('/add-following', async (req, res) => {
   const {fieldId, userId} = req.body;
   
-
   try {
     const result = await pool.query('INSERT INTO following (user_id, field_id) VALUES ($1, $2) RETURNING *', [userId, fieldId]);
     const dataField = await pool.query('SELECT user_id FROM field WHERE field_id = $1', [fieldId]);
     const fieldOwnerId = dataField.rows[0]?.user_id;
     res.status(200).json({message: 'Following added successfully', following: 1, data: result.rows[0]});
-    // if(req){
-    //     req.io.emit('new_notification', {topic: 'new_following', reciveId: Number(fieldId), senderId: Number(userId)});
-    // }
-    if (req ) {
+    
+    if(req && req.io){
+        req.io.emit('new_notification', {topic: 'new_following', reciveId: Number(fieldOwnerId), senderId: Number(userId)});
+    }
+    if (req && req.io) {
         req.io.emit('following', {following: Number(1), fieldId: Number(fieldId), userId: Number(userId), fieldOwnerId: Number(fieldOwnerId)});
     }
 
@@ -35,10 +35,13 @@ router.delete('/cancel-following', async (req, res) => {
         const dataField = await pool.query('SELECT user_id FROM field WHERE field_id = $1', [fieldId]);
         const fieldOwnerId = dataField.rows[0]?.user_id;
         res.status(200).json({message: 'Following removed successfully', following: 0, data: result.rows[0]});
-        if (req ) {
+        
+        if(req && req.io){
+            req.io.emit('new_notification', {topic: 'cancel_following', reciveId: Number(fieldOwnerId), senderId: Number(userId)});
+        }
+        if (req && req.io) {
             req.io.emit('following', {following: Number(0), fieldId: Number(fieldId), userId: Number(userId), fieldOwnerId: Number(fieldOwnerId)});
         }
-
 
     } catch (err) {
         console.error(err.message);

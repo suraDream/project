@@ -67,9 +67,27 @@ export default function CheckFieldDetail() {
       console.log("Socket connected:", socket.id);
     });
     socket.on('following', (data) => {
-      if (data.fieldId === Number(fieldId) && data.userId === Number(user?.user_id)) {
+      if (data.fieldId === Number(fieldId) && data.userId === Number(user?.user_id) || data.fieldOwnerId === Number(user?.user_id)) {
         fetchFollowing();
       }
+      
+       if (data.fieldId === Number(fieldId) && data.userId === Number(user?.user_id)) {
+         console.log("Following status updated:", data.following);
+         if(data.following === 1) {
+          setFollowers(true);
+         }
+         else{
+          setFollowers(false);
+         }
+        
+       }
+
+       
+       if (data.fieldId === Number(fieldId) && data.fieldOwnerId === Number(user?.user_id)) {
+         console.log("Owner followers update:", data);
+       fetchFollowerAll(); 
+     }
+
     });
     return () => { socket.disconnect(); };
 
